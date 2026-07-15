@@ -1,0 +1,1239 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sistema APR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --navy: #172038;
+    --navy-2: #22304f;
+    --paper: #F3F1EA;
+    --card: #ffffff;
+    --ink: #1C2333;
+    --muted: #6B7280;
+    --line: #E3DFD3;
+    --green: #1E8E5A;
+    --green-bg: #E4F4EC;
+    --amber: #B9760C;
+    --amber-bg: #FBF0DC;
+    --red: #C13B32;
+    --red-bg: #FBE9E7;
+    --blue: #2C5AA8;
+    --blue-bg: #E7EEF9;
+    --purple: #6A4E9C;
+    --purple-bg: #EFE9F7;
+    --stamp: #C13B32;
+    --radius: 14px;
+    --disp: 'Space Grotesk', sans-serif;
+    --body: 'Inter', sans-serif;
+    --mono: 'JetBrains Mono', monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    font-family: var(--body);
+    background: transparent;
+    color: var(--ink);
+    display:flex;
+    justify-content:center;
+    -webkit-font-smoothing:antialiased;
+  }
+  #app{
+    width:100%;
+    max-width:460px;
+    min-height:100vh;
+    background: var(--paper);
+    position:relative;
+    display:flex;
+    flex-direction:column;
+    box-shadow: 0 0 0 1px var(--line);
+    border-radius: 18px;
+    overflow:hidden;
+  }
+
+  /* Ticket rail / perforated edge signature element */
+  .ticket-rail{
+    position:absolute;
+    left:0; top:0; bottom:0;
+    width:6px;
+    background: repeating-linear-gradient(180deg, var(--navy) 0 6px, transparent 6px 14px);
+    opacity:.35;
+    z-index:5;
+  }
+
+  header.topbar{
+    background: var(--navy);
+    color:#fff;
+    padding:16px 18px 14px 22px;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    position:relative;
+  }
+  header.topbar .back{
+    cursor:pointer;
+    font-size:20px;
+    line-height:1;
+    width:28px;
+    color: rgba(255,255,255,.85);
+  }
+  header.topbar .titles{flex:1;}
+  header.topbar .eyebrow{
+    font-family: var(--mono);
+    font-size:10.5px;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    color: rgba(255,255,255,.55);
+    margin-bottom:2px;
+  }
+  header.topbar h1{
+    font-family: var(--disp);
+    font-size:17px;
+    margin:0;
+    font-weight:600;
+  }
+  header.topbar .bell{
+    cursor:pointer;
+    width:34px; height:34px;
+    border-radius:50%;
+    background: rgba(255,255,255,.1);
+    display:flex; align-items:center; justify-content:center;
+    position:relative;
+    flex-shrink:0;
+  }
+  header.topbar .bell .dot{
+    position:absolute; top:6px; right:7px;
+    width:7px; height:7px; border-radius:50%;
+    background: var(--stamp);
+    border:1.5px solid var(--navy);
+  }
+
+  main{
+    flex:1;
+    padding: 18px 18px 100px 22px;
+    overflow-y:auto;
+  }
+
+  /* Step rail (numbered process, since APR literally IS a sequential process) */
+  .steprail{
+    display:flex;
+    align-items:center;
+    gap:0;
+    margin-bottom:20px;
+    overflow-x:auto;
+    padding-bottom:4px;
+  }
+  .steprail .seg{
+    display:flex; align-items:center; flex-shrink:0;
+  }
+  .steprail .node{
+    width:26px; height:26px;
+    border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    font-family:var(--mono); font-size:11px; font-weight:600;
+    background: var(--card);
+    border:1.5px solid var(--line);
+    color: var(--muted);
+    flex-shrink:0;
+  }
+  .steprail .node.done{ background: var(--navy); border-color:var(--navy); color:#fff; }
+  .steprail .node.current{ background:#fff; border-color:var(--navy); color:var(--navy); box-shadow:0 0 0 3px rgba(23,32,56,.12); }
+  .steprail .bar{ width:14px; height:2px; background: var(--line); flex-shrink:0; }
+  .steprail .bar.done{ background: var(--navy); }
+
+  .eyebrow-label{
+    font-family: var(--mono);
+    font-size:10.5px;
+    letter-spacing:.1em;
+    text-transform:uppercase;
+    color: var(--muted);
+    margin: 0 0 6px 0;
+  }
+  h2.screen-title{
+    font-family: var(--disp);
+    font-size: 21px;
+    margin: 0 0 4px 0;
+    color: var(--navy);
+  }
+  p.screen-sub{
+    color: var(--muted);
+    font-size: 13.5px;
+    margin:0 0 20px 0;
+    line-height:1.4;
+  }
+
+  .card{
+    background: var(--card);
+    border:1px solid var(--line);
+    border-radius: var(--radius);
+    padding:16px;
+    margin-bottom:14px;
+  }
+
+  .field{ margin-bottom:14px; }
+  .field label{
+    display:block;
+    font-size:12px;
+    font-weight:600;
+    color: var(--ink);
+    margin-bottom:5px;
+  }
+  .field .hint{ font-size:11px; color:var(--muted); margin-top:4px; }
+  .field input, .field textarea, .field select{
+    width:100%;
+    border:1.5px solid var(--line);
+    border-radius:9px;
+    padding:10px 11px;
+    font-family: var(--body);
+    font-size:14px;
+    background:#fbfaf7;
+    color: var(--ink);
+  }
+  .field input:focus, .field textarea:focus, .field select:focus{
+    outline:none;
+    border-color: var(--navy);
+    background:#fff;
+  }
+  .row2{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+
+  .worktype-list{ display:flex; flex-direction:column; gap:8px; }
+  .worktype{
+    display:flex; align-items:center; gap:11px;
+    padding:12px 13px;
+    border:1.5px solid var(--line);
+    border-radius:11px;
+    background:#fbfaf7;
+    cursor:pointer;
+    font-size:14px;
+    font-weight:500;
+    transition: border-color .12s, background .12s;
+  }
+  .worktype.sel{
+    border-color: var(--navy);
+    background: #fff;
+    box-shadow: inset 0 0 0 1px var(--navy);
+  }
+  .worktype .cb{
+    width:19px; height:19px; border-radius:5px;
+    border:1.5px solid #C7C2B2;
+    flex-shrink:0;
+    display:flex; align-items:center; justify-content:center;
+    font-size:12px; color:#fff;
+    background:#fff;
+  }
+  .worktype.sel .cb{ background: var(--navy); border-color:var(--navy); }
+
+  .checklist-item{
+    border:1px solid var(--line);
+    border-radius:11px;
+    padding:12px 13px;
+    margin-bottom:9px;
+    background: var(--card);
+  }
+  .checklist-item.critical{ border-left:3px solid var(--stamp); }
+  .ci-top{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  .ci-name{ font-size:13.5px; font-weight:600; line-height:1.35; }
+  .ci-crit-tag{
+    font-family:var(--mono); font-size:9px; letter-spacing:.06em;
+    color: var(--stamp); text-transform:uppercase; margin-top:2px;
+  }
+  .ci-opts{ display:flex; gap:6px; flex-shrink:0; }
+  .pill{
+    font-size:11.5px; font-weight:600; padding:5px 10px; border-radius:7px;
+    border:1.5px solid var(--line); cursor:pointer; background:#fbfaf7; color:var(--muted);
+    white-space:nowrap;
+  }
+  .pill.on.cumple{ background: var(--green-bg); border-color: var(--green); color: var(--green); }
+  .pill.on.na{ background:#EEECE4; border-color:#B8B2A0; color:#5b5647; }
+  .ci-photo{
+    margin-top:10px;
+    display:flex; align-items:center; gap:8px;
+    font-size:12px; color:var(--muted);
+  }
+  .photo-box{
+    width:44px; height:44px; border-radius:8px;
+    border:1.5px dashed #C7C2B2;
+    display:flex; align-items:center; justify-content:center;
+    cursor:pointer; flex-shrink:0; background:#fbfaf7;
+    font-size:16px; color:#B8B2A0;
+    overflow:hidden;
+  }
+  .photo-box.attached{ border-style:solid; border-color:var(--green); background:var(--green-bg); color:var(--green); font-size:18px; }
+
+  .btnbar{
+    position:absolute; left:6px; right:0; bottom:0;
+    background: linear-gradient(180deg, rgba(243,241,234,0) 0%, var(--paper) 30%);
+    padding: 26px 18px 18px 22px;
+    display:flex; gap:10px;
+  }
+  .btn{
+    flex:1;
+    border:none;
+    border-radius:11px;
+    padding:13px 16px;
+    font-family:var(--body);
+    font-weight:600;
+    font-size:14.5px;
+    cursor:pointer;
+    text-align:center;
+  }
+  .btn.primary{ background: var(--navy); color:#fff; }
+  .btn.primary:disabled{ background:#B9C0CE; cursor:not-allowed; }
+  .btn.ghost{ background:transparent; color:var(--navy); border:1.5px solid var(--line); flex:0 0 92px; }
+  .btn.danger{ background: var(--red); color:#fff; }
+  .btn.success{ background: var(--green); color:#fff; }
+  .btn.outline-amber{ background:#fff; color:var(--amber); border:1.5px solid var(--amber); }
+
+  .badge{
+    display:inline-flex; align-items:center; gap:5px;
+    font-size:11.5px; font-weight:700;
+    padding:4px 10px; border-radius:20px;
+    font-family: var(--mono); letter-spacing:.02em;
+  }
+  .badge.autorizado{ background:var(--green-bg); color:var(--green); }
+  .badge.rechazado{ background:var(--red-bg); color:var(--red); }
+  .badge.correccion{ background:var(--amber-bg); color:var(--amber); }
+  .badge.pendiente{ background:var(--amber-bg); color:var(--amber); }
+  .badge.ejecucion{ background:var(--blue-bg); color:var(--blue); }
+  .badge.cerrado{ background:var(--purple-bg); color:var(--purple); }
+  .badge.borrador{ background:#EEECE4; color:#6b6656; }
+
+  .summary-row{ display:flex; justify-content:space-between; padding:9px 0; border-bottom:1px solid #EFEDE4; font-size:13.5px; }
+  .summary-row:last-child{ border-bottom:none; }
+  .summary-row .k{ color:var(--muted); }
+  .summary-row .v{ font-weight:600; text-align:right; }
+
+  .folio{
+    font-family: var(--mono); font-weight:700; font-size:15px; color:var(--navy);
+    letter-spacing:.02em;
+  }
+
+  /* landing */
+  .hero{
+    background: var(--navy);
+    color:#fff;
+    margin: -18px -18px -18px -22px;
+    padding: 30px 22px 34px 26px;
+    position:relative;
+    overflow:hidden;
+  }
+  .hero::after{
+    content:"";
+    position:absolute; right:-40px; top:-40px;
+    width:160px; height:160px; border-radius:50%;
+    border: 1px solid rgba(255,255,255,.08);
+  }
+  .hero-badge{
+    width:52px; height:52px; border-radius:13px;
+    background: rgba(255,255,255,.08);
+    display:flex; align-items:center; justify-content:center;
+    font-size:24px; margin-bottom:16px;
+  }
+  .hero h1{ font-family:var(--disp); font-size:25px; margin:0 0 6px 0; }
+  .hero p{ color:rgba(255,255,255,.6); font-size:13.5px; margin:0; line-height:1.5; }
+  .hero-cta{ margin-top:22px; display:flex; flex-direction:column; gap:9px; }
+  .hero-cta .btn.primary{ background:#fff; color:var(--navy); }
+  .hero-cta .btn.line{ background:transparent; color:#fff; border:1.5px solid rgba(255,255,255,.3); }
+
+  .landing-body{ padding-top:22px; }
+  .apr-card{
+    display:flex; align-items:center; gap:12px;
+    padding:13px; border:1px solid var(--line); border-radius:12px;
+    background:var(--card); margin-bottom:9px; cursor:pointer;
+  }
+  .apr-card .fnum{ font-family:var(--mono); font-weight:700; font-size:13px; color:var(--navy); }
+  .apr-card .meta{ font-size:11.5px; color:var(--muted); margin-top:2px; }
+  .apr-card .flex1{ flex:1; }
+
+  .empty-state{ text-align:center; padding:30px 10px; color:var(--muted); font-size:13px; }
+
+  .role-switch{
+    display:flex; gap:6px; margin-bottom:16px;
+    background:#EEECE4; padding:3px; border-radius:9px;
+  }
+  .role-switch button{
+    flex:1; border:none; background:transparent; padding:8px; border-radius:7px;
+    font-size:12px; font-weight:600; color:var(--muted); cursor:pointer; font-family:var(--body);
+  }
+  .role-switch button.active{ background:#fff; color:var(--navy); box-shadow:0 1px 2px rgba(0,0,0,.08); }
+
+  .notif-item{ display:flex; gap:10px; padding:12px 0; border-bottom:1px solid #EFEDE4; }
+  .notif-item .ic{ width:32px; height:32px; border-radius:9px; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:15px; }
+  .notif-item .txt{ font-size:13px; line-height:1.4; }
+  .notif-item .t{ font-size:11px; color:var(--muted); margin-top:2px; }
+
+  .rule-item{ display:flex; gap:9px; font-size:12.5px; padding:8px 0; border-bottom:1px solid #EFEDE4; line-height:1.4; color:var(--ink); }
+  .rule-item:last-child{ border-bottom:none; }
+  .rule-item .n{ font-family:var(--mono); color:var(--muted); flex-shrink:0; }
+
+  ::-webkit-scrollbar{ width:0; height:0; }
+
+  .toast{
+    position:fixed; left:50%; bottom:100px; transform:translateX(-50%);
+    background: var(--navy); color:#fff; padding:11px 18px; border-radius:10px;
+    font-size:13px; font-weight:600; z-index:50;
+    box-shadow:0 8px 24px rgba(0,0,0,.2);
+    opacity:0; pointer-events:none; transition:opacity .25s, transform .25s;
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(-6px); }
+
+  textarea{ resize:none; min-height:64px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div class="toast" id="toast"></div>
+<script>
+/* ===================== DATA ===================== */
+const WORK_TYPES = [
+  {key:'alturas', label:'Trabajo en alturas'},
+  {key:'caliente', label:'Trabajo en caliente (soldadura / corte)'},
+  {key:'electrico', label:'Trabajo eléctrico'},
+  {key:'confinado', label:'Espacio confinado'},
+  {key:'izaje', label:'Izaje / maniobras'},
+  {key:'excavacion', label:'Excavación'},
+  {key:'loto', label:'Bloqueo y etiquetado (LOTO)'},
+  {key:'quimicos', label:'Sustancias químicas peligrosas'},
+  {key:'plataformas', label:'Uso de plataformas de elevación'},
+  {key:'contratistas', label:'Trabajo con contratistas'},
+  {key:'otro', label:'Otro'},
+];
+
+const EQUIPO_ALTURAS = [
+  {key:'plataforma', label:'Plataforma de elevación'},
+  {key:'tijera', label:'Escalera de tijera'},
+  {key:'extension', label:'Escalera de extensión'},
+  {key:'andamios', label:'Andamios'},
+  {key:'otro_equipo', label:'Otro'},
+];
+
+function critItems(names, criticalIdx){
+  return names.map((n,i)=>({
+    id: 'ci_'+Math.random().toString(36).slice(2,9),
+    name:n, critical: criticalIdx.includes(i), status:null, photo:null
+  }));
+}
+
+const CHECKLIST_TEMPLATES = {
+  alturas_epp: ()=>critItems([
+    'Arnés de cuerpo completo en buen estado',
+    'Línea de vida en buen estado',
+    'Ganchos con doble seguro funcional',
+    'Absorbedor de impacto en buen estado',
+    'Punto de anclaje identificado',
+    'Punto de anclaje resistente y autorizado',
+    'Casco con barboquejo',
+    'Calzado de seguridad',
+    'Capacitación vigente para trabajo en alturas',
+  ], [0,1,2,3,4,5,8]),
+  caliente: ()=>critItems([
+    'Permiso de trabajo en caliente vigente',
+    'Extintor disponible en el área',
+    'Retiro de materiales combustibles cercanos',
+    'Vigía de fuego asignado',
+    'Pantallas contra chispa colocadas',
+  ], [0,2,3]),
+  electrico: ()=>critItems([
+    'Bloqueo y etiquetado (LOTO) aplicado',
+    'Prueba de ausencia de tensión realizada',
+    'Guantes dieléctricos en buen estado',
+    'Herramienta aislada verificada',
+  ], [0,1]),
+  confinado: ()=>critItems([
+    'Permiso de entrada a espacio confinado vigente',
+    'Medición de gases realizada',
+    'Vigía externo asignado',
+    'Equipo de rescate disponible',
+    'Ventilación forzada instalada',
+  ], [0,1,3]),
+  izaje: ()=>critItems([
+    'Inspección de grúa / equipo de izaje',
+    'Aparejos y eslingas en buen estado',
+    'Radio de giro delimitado',
+    'Operador certificado vigente',
+  ], [0,3]),
+  excavacion: ()=>critItems([
+    'Estudio de mecánica de suelos disponible',
+    'Taludes o entibados adecuados',
+    'Señalización perimetral colocada',
+    'Servicios subterráneos identificados',
+  ], [1,3]),
+  loto: ()=>critItems([
+    'Candados y tarjetas de bloqueo colocados',
+    'Verificación de energía cero',
+    'Lista de puntos de bloqueo firmada',
+  ], [0,1,2]),
+  quimicos: ()=>critItems([
+    'Hoja de seguridad (MSDS) disponible',
+    'EPP químico específico verificado',
+    'Ducha / lavaojos de emergencia accesible',
+  ], [0,2]),
+  plataformas: ()=>critItems([
+    'Inspección diaria de la plataforma',
+    'Barandales y compuertas en buen estado',
+    'Anclaje de arnés dentro de la canastilla',
+  ], [0,1,2]),
+  contratistas: ()=>critItems([
+    'Documentación legal del contratista vigente',
+    'Inducción de seguridad impartida',
+    'Seguro de responsabilidad civil vigente',
+  ], [0,1]),
+  otro: ()=>critItems([
+    'Análisis de riesgo específico documentado',
+    'Medidas de control verificadas',
+  ], [0]),
+  equipo_plataforma: ()=>critItems([
+    'Plataforma inspeccionada antes de uso',
+    'Barandal y compuerta de acceso en buen estado',
+    'Anclaje del arnés dentro de la plataforma',
+  ], [0,2]),
+  equipo_tijera: ()=>critItems([
+    'Escalera con zapatas antiderrapantes',
+    'Ángulo de apertura correcto y trabado',
+    'Superficie de apoyo nivelada',
+  ], [1]),
+  equipo_extension: ()=>critItems([
+    'Amarre superior de la escalera verificado',
+    'Ángulo 4:1 correcto',
+    'Sobrepasa el punto de apoyo 1m',
+  ], [0]),
+  equipo_andamios: ()=>critItems([
+    'Andamio armado por personal certificado',
+    'Barandales y rodapiés instalados',
+    'Tarjeta de andamio (verde) colocada',
+  ], [0,2]),
+  equipo_otro: ()=>critItems([
+    'Equipo inspeccionado antes de uso',
+    'Capacitación de uso vigente',
+  ], []),
+};
+
+const TYPE_LABEL = Object.fromEntries(WORK_TYPES.map(t=>[t.key,t.label]));
+const EQUIPO_LABEL = Object.fromEntries(EQUIPO_ALTURAS.map(t=>[t.key,t.label]));
+
+/* ===================== SUPABASE ===================== */
+const SUPABASE_URL = 'https://xcygrktfjjbcaonvgbel.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhjeWdya3RmampiY2FvbnZnYmVsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQxNDIzOTMsImV4cCI6MjA5OTcxODM5M30.m5Yi1ONp-Le_RxFxr1d2Cot0tA01UlEzAfufTRMT0UE';
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/* ===================== STATE ===================== */
+let state = {
+  screen: 'login',
+  role: 'user', // 'user' | 'ehs' — vista de demostración, no cambia el rol real en la BD
+  user: null,
+  profile: null,
+  aprs: [], // resumen (folio, empresa, area, status) cargado de Supabase
+  currentId: null,
+  notifications: [],
+  draft: null,
+};
+
+async function nextFolio(){
+  const y = new Date().getFullYear();
+  const { count } = await supabase.from('aprs').select('*', { count: 'exact', head: true });
+  return 'APR-'+y+'-'+String((count||0)+1).padStart(4,'0');
+}
+
+function startDraft(){
+  state.draft = {
+    id: 'draft_'+Math.random().toString(36).slice(2,9),
+    folio: 'BORRADOR',
+    datos: {empresa:'', fecha:'', horaInicio:'', trabajadores:'', area:'', descripcion:'', duracionInicio:'', duracionFin:'', responsableInterno:'', supervisorSeguridad:''},
+    tipos: [],
+    equipo: null,
+    checklists: [],
+    checklistStep: 0,
+    status: 'borrador',
+    comments: [],
+  };
+}
+
+function buildChecklists(){
+  const cls = [];
+  state.draft.tipos.forEach(tk=>{
+    if(tk==='alturas'){
+      cls.push({key:'alturas_epp', title:'Checklist: Dispositivos de protección personal contra caídas', items: CHECKLIST_TEMPLATES.alturas_epp()});
+      if(state.draft.equipo){
+        const eq = state.draft.equipo;
+        const tplKey = 'equipo_'+eq;
+        cls.push({key:tplKey, title:'Checklist: '+EQUIPO_LABEL[eq], items: CHECKLIST_TEMPLATES[tplKey]()});
+      }
+    } else {
+      cls.push({key:tk, title:'Checklist: '+TYPE_LABEL[tk], items: CHECKLIST_TEMPLATES[tk]()});
+    }
+  });
+  state.draft.checklists = cls;
+}
+
+function checklistComplete(cl){
+  return cl.items.every(it=>it.status!==null);
+}
+function checklistHasBlockingCritical(cl){
+  return cl.items.some(it=>it.critical && it.status==='cumple' && !it.photo===true && false); // placeholder unused
+}
+function totalCriticalMissingPhoto(cl){
+  return cl.items.filter(it=>it.critical && it.status==='cumple' && !it.photo).length;
+}
+function allChecklistsDone(){
+  return state.draft.checklists.every(cl=>checklistComplete(cl));
+}
+function allCriticalPhotosOk(){
+  return state.draft.checklists.every(cl=>totalCriticalMissingPhoto(cl)===0);
+}
+function completedChecklistsCount(){
+  return state.draft.checklists.filter(cl=>checklistComplete(cl)).length;
+}
+
+function nav(screen){ state.screen = screen; render(); window.scrollTo(0,0); }
+
+/* ===================== SESIÓN Y CARGA DE DATOS ===================== */
+async function initApp(){
+  const { data: { session } } = await supabase.auth.getSession();
+  if(session){ state.user = session.user; await afterLogin(); }
+  else { nav('login'); }
+}
+
+async function doLogin(){
+  const email = val('login_email');
+  const password = val('login_password');
+  if(!email || !password){ showToast('Escribe correo y contraseña'); return; }
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if(error){ showToast('Correo o contraseña incorrectos'); return; }
+  state.user = data.user;
+  await afterLogin();
+}
+
+async function doLogout(){
+  await supabase.auth.signOut();
+  state.user = null; state.profile = null; state.aprs = []; state.notifications = [];
+  nav('login');
+}
+
+async function afterLogin(){
+  await loadProfile();
+  await loadAprsFromDB();
+  await loadNotificaciones();
+  nav('landing');
+}
+
+async function loadProfile(){
+  let { data } = await supabase.from('profiles').select('*').eq('id', state.user.id).single();
+  if(!data){
+    const ins = await supabase.from('profiles')
+      .insert({ id: state.user.id, nombre: state.user.email, rol: 'solicitante' })
+      .select().single();
+    data = ins.data;
+  }
+  state.profile = data;
+  state.role = data && data.rol === 'jefe_ehs' ? 'ehs' : 'user';
+}
+
+async function setRole(r){
+  state.role = r;
+  render();
+  await loadNotificaciones();
+  render();
+}
+
+async function loadAprsFromDB(){
+  const { data, error } = await supabase.from('aprs')
+    .select('id, folio, empresa, area, status')
+    .order('created_at', { ascending: false });
+  if(error){ console.error(error); return; }
+  state.aprs = (data||[]).map(r=>({ id:r.id, folio:r.folio, status:r.status, datos:{empresa:r.empresa, area:r.area} }));
+}
+
+function inferTag(texto){
+  if(/pendiente/i.test(texto)) return 'pendiente';
+  if(/aprobado/i.test(texto)) return 'autorizado';
+  if(/rechazado/i.test(texto)) return 'rechazado';
+  if(/corrección/i.test(texto)) return 'correccion';
+  if(/ejecución/i.test(texto)) return 'ejecucion';
+  if(/cerrado/i.test(texto)) return 'cerrado';
+  return 'pendiente';
+}
+
+async function loadNotificaciones(){
+  const rolDb = state.role==='ehs' ? 'jefe_ehs' : 'solicitante';
+  const { data, error } = await supabase.from('notificaciones')
+    .select('*').eq('para_rol', rolDb)
+    .order('created_at', { ascending:false }).limit(30);
+  if(error){ console.error(error); return; }
+  state.notifications = (data||[]).map(n=>({
+    id:n.id, text:n.texto, tag:inferTag(n.texto),
+    time:new Date(n.created_at).toLocaleString('es-MX', {day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit'})
+  }));
+}
+
+async function loadAprDetail(id){
+  const { data: apr } = await supabase.from('aprs').select('*').eq('id', id).single();
+  const { data: checklists } = await supabase.from('checklists').select('*, checklist_items(*)').eq('apr_id', id);
+  const { data: comentariosRows } = await supabase.from('comentarios').select('*').eq('apr_id', id).order('created_at');
+  state.draft = {
+    id: apr.id,
+    folio: apr.folio,
+    datos: {
+      empresa: apr.empresa, area: apr.area, descripcion: apr.descripcion, fecha: apr.fecha,
+      horaInicio: apr.hora_inicio, trabajadores: apr.trabajadores,
+      responsableInterno: apr.responsable_interno, supervisorSeguridad: apr.supervisor_seguridad,
+    },
+    tipos: apr.tipos_trabajo || [],
+    equipo: apr.equipo,
+    checklists: (checklists||[]).map(cl=>({
+      key: cl.clave, title: cl.titulo,
+      items: (cl.checklist_items||[]).map(it=>({ id:it.id, name:it.nombre, critical:it.critico, status:it.status, photo:it.foto_url }))
+    })),
+    checklistStep: 0,
+    status: apr.status,
+    comments: (comentariosRows||[]).map(c=>c.texto),
+  };
+}
+
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2200);
+}
+
+/* ===================== STEP RAIL ===================== */
+const STEP_LABELS = ['Datos','Tipo','Checklist','Resumen','Envío','Revisión','Resultado'];
+function stepRail(current){
+  let html = '<div class="steprail">';
+  STEP_LABELS.forEach((lbl,i)=>{
+    const n = i+1;
+    let cls = 'node';
+    if(n < current) cls += ' done';
+    else if(n === current) cls += ' current';
+    html += `<div class="seg"><div class="${cls}">${n < current ? '✓' : n}</div></div>`;
+    if(i < STEP_LABELS.length-1){
+      html += `<div class="bar ${n<current?'done':''}"></div>`;
+    }
+  });
+  html += '</div>';
+  return html;
+}
+
+function statusBadge(status){
+  const map = {
+    borrador:['Borrador','borrador'],
+    pendiente:['Pendiente EHS','pendiente'],
+    autorizado:['Autorizado','autorizado'],
+    rechazado:['Rechazado','rechazado'],
+    correccion:['En corrección','correccion'],
+    ejecucion:['En ejecución','ejecucion'],
+    cerrado:['Cerrado','cerrado'],
+  };
+  const [lbl,cls] = map[status] || ['—','borrador'];
+  return `<span class="badge ${cls}">${lbl}</span>`;
+}
+
+function header(title, eyebrow, opts){
+  opts = opts||{};
+  const backBtn = opts.back ? `<div class="back" onclick="${opts.back}">←</div>` : '<div style="width:28px"></div>';
+  const unread = state.notifications.length>0;
+  return `
+    <header class="topbar">
+      ${backBtn}
+      <div class="titles">
+        ${eyebrow?`<div class="eyebrow">${eyebrow}</div>`:''}
+        <h1>${title}</h1>
+      </div>
+      <div class="bell" onclick="nav('notificaciones')">🔔${unread?'<div class="dot"></div>':''}</div>
+    </header>`;
+}
+
+/* ===================== SCREENS ===================== */
+function renderLogin(){
+  return `
+    <div class="hero">
+      <div class="hero-badge">🛡️</div>
+      <h1>Sistema de Análisis<br>Previo de Riesgo</h1>
+      <p>Inicia sesión con tu usuario de la empresa para continuar.</p>
+    </div>
+    <main style="padding-top:22px;">
+      <div class="card">
+        <div class="field"><label>Correo</label><input type="email" id="login_email" placeholder="tucorreo@empresa.com"></div>
+        <div class="field"><label>Contraseña</label><input type="password" id="login_password" placeholder="••••••••"></div>
+      </div>
+      <button class="btn primary" style="width:100%" onclick="doLogin()">Iniciar sesión</button>
+      <p style="font-size:11.5px;color:var(--muted);text-align:center;margin-top:14px;">Tu usuario debe existir en Supabase (Authentication → Users).</p>
+    </main>
+  `;
+}
+
+function renderLanding(){
+  return `
+    <div class="hero">
+      <div class="hero-badge">🛡️</div>
+      <h1>Sistema de Análisis<br>Previo de Riesgo</h1>
+      <p>Digitaliza el APR: captura, checklists por tipo de trabajo, evidencia fotográfica y aprobación de EHS en un solo flujo.</p>
+      <div class="hero-cta">
+        <button class="btn primary" onclick="startDraft(); nav('nuevo-datos')">+ Crear nuevo APR</button>
+        <button class="btn line" onclick="nav('mis-aprs')">Mis APR (${state.aprs.length})</button>
+      </div>
+    </div>
+    <div class="landing-body">
+      <div class="role-switch">
+        <button class="${state.role==='user'?'active':''}" onclick="setRole('user')">Vista solicitante</button>
+        <button class="${state.role==='ehs'?'active':''}" onclick="setRole('ehs')">Vista Jefe de EHS</button>
+      </div>
+      <p style="font-size:10.5px;color:var(--muted);margin:-6px 0 16px 2px;">Vista de demostración — no cambia tu rol real, solo lo que se te muestra aquí.</p>
+      <div class="eyebrow-label">Actividad reciente</div>
+      ${state.aprs.slice(0,3).map(a=>aprMiniCard(a)).join('') || '<div class="empty-state">Aún no hay APR creados.</div>'}
+      <button class="btn ghost" style="width:100%;margin-top:18px;" onclick="doLogout()">Cerrar sesión (${state.user?state.user.email:''})</button>
+    </div>
+  `;
+}
+
+function aprMiniCard(a){
+  return `
+    <div class="apr-card" onclick="goToStatusScreen('${a.id}')">
+      <div class="flex1">
+        <div class="fnum">${a.folio}</div>
+        <div class="meta">${a.datos.empresa || 'Sin empresa'} · ${a.datos.area || 'Sin área'}</div>
+      </div>
+      ${statusBadge(a.status)}
+    </div>`;
+}
+
+async function goToStatusScreen(id){
+  state.currentId = id;
+  await loadAprDetail(id);
+  if(state.draft.status==='pendiente' && state.role==='ehs') nav('revision');
+  else nav('resultado');
+}
+
+function renderMisAprs(){
+  return `
+    ${header('Mis APR', 'HISTORIAL', {back:"nav('landing')"})}
+    <main>
+      ${state.aprs.length ? state.aprs.map(a=>aprMiniCard(a)).join('') : '<div class="empty-state">Aún no has creado ningún APR.<br>Toca "Crear nuevo APR" para empezar.</div>'}
+    </main>
+  `;
+}
+
+function renderNuevoDatos(){
+  const d = state.draft.datos;
+  return `
+    ${header('Datos generales del APR', 'PASO 1 · '+state.draft.folio, {back:"nav('landing')"})}
+    <main>
+      ${stepRail(1)}
+      <h2 class="screen-title">Datos generales</h2>
+      <p class="screen-sub">Captura la información base del trabajo y del contratista.</p>
+      <div class="card">
+        <div class="row2">
+          <div class="field"><label>Fecha</label><input type="date" id="f_fecha" value="${d.fecha}"></div>
+          <div class="field"><label>Hora de inicio</label><input type="time" id="f_hora" value="${d.horaInicio}"></div>
+        </div>
+        <div class="field"><label>Empresa contratista</label><input type="text" id="f_empresa" placeholder="Ej. Contratista XYZ SA de CV" value="${d.empresa}"></div>
+        <div class="row2">
+          <div class="field"><label>Número de trabajadores</label><input type="number" id="f_trab" min="1" value="${d.trabajadores}"></div>
+          <div class="field"><label>Área donde se realizará</label><input type="text" id="f_area" placeholder="Planta 1 – Línea 3" value="${d.area}"></div>
+        </div>
+        <div class="field"><label>Descripción del trabajo</label><textarea id="f_desc" placeholder="Ej. Mantenimiento en estructura en área de tolvas">${d.descripcion}</textarea></div>
+        <div class="row2">
+          <div class="field"><label>Duración · inicio</label><input type="datetime-local" id="f_dini" value="${d.duracionInicio}"></div>
+          <div class="field"><label>Duración · fin</label><input type="datetime-local" id="f_dfin" value="${d.duracionFin}"></div>
+        </div>
+        <div class="field"><label>Responsable interno</label><input type="text" id="f_resp" placeholder="Nombre" value="${d.responsableInterno}"></div>
+        <div class="field"><label>Supervisor de seguridad</label><input type="text" id="f_sup" placeholder="Nombre" value="${d.supervisorSeguridad}"></div>
+      </div>
+    </main>
+    <div class="btnbar">
+      <button class="btn primary" onclick="saveDatosAndNext()">Siguiente</button>
+    </div>
+  `;
+}
+
+function saveDatosAndNext(){
+  const d = state.draft.datos;
+  d.fecha = val('f_fecha'); d.horaInicio = val('f_hora'); d.empresa = val('f_empresa');
+  d.trabajadores = val('f_trab'); d.area = val('f_area'); d.descripcion = val('f_desc');
+  d.duracionInicio = val('f_dini'); d.duracionFin = val('f_dfin');
+  d.responsableInterno = val('f_resp'); d.supervisorSeguridad = val('f_sup');
+  if(!d.empresa || !d.area){ showToast('Completa al menos empresa y área'); return; }
+  nav('nuevo-tipo');
+}
+function val(id){ const el = document.getElementById(id); return el ? el.value : ''; }
+
+function renderNuevoTipo(){
+  return `
+    ${header('Tipo de trabajo', 'PASO 2 · '+state.draft.folio, {back:"nav('nuevo-datos')"})}
+    <main>
+      ${stepRail(2)}
+      <h2 class="screen-title">Selecciona el tipo de trabajo de alto riesgo</h2>
+      <p class="screen-sub">Puedes elegir más de uno. Cada tipo genera su propio checklist.</p>
+      <div class="worktype-list">
+        ${WORK_TYPES.map(t=>`
+          <div class="worktype ${state.draft.tipos.includes(t.key)?'sel':''}" onclick="toggleTipo('${t.key}')">
+            <div class="cb">${state.draft.tipos.includes(t.key)?'✓':''}</div>
+            <div>${t.label}</div>
+          </div>
+        `).join('')}
+      </div>
+    </main>
+    <div class="btnbar">
+      <button class="btn primary" ${state.draft.tipos.length===0?'disabled':''} onclick="afterTipoNext()">Siguiente</button>
+    </div>
+  `;
+}
+function toggleTipo(k){
+  const i = state.draft.tipos.indexOf(k);
+  if(i>=0) state.draft.tipos.splice(i,1); else state.draft.tipos.push(k);
+  render();
+}
+function afterTipoNext(){
+  if(state.draft.tipos.includes('alturas')){ nav('nuevo-equipo'); }
+  else { buildChecklists(); state.draft.checklistStep=0; nav('nuevo-checklist'); }
+}
+
+function renderNuevoEquipo(){
+  return `
+    ${header('Equipo a utilizar', 'PASO 2.1 · Trabajo en alturas', {back:"nav('nuevo-tipo')"})}
+    <main>
+      ${stepRail(2)}
+      <h2 class="screen-title">¿Con qué equipo se realizará el trabajo en alturas?</h2>
+      <p class="screen-sub">Dependiendo de la opción, se abrirá el checklist específico de ese equipo.</p>
+      <div class="worktype-list">
+        ${EQUIPO_ALTURAS.map(e=>`
+          <div class="worktype ${state.draft.equipo===e.key?'sel':''}" onclick="state.draft.equipo='${e.key}'; render()">
+            <div class="cb">${state.draft.equipo===e.key?'✓':''}</div>
+            <div>${e.label}</div>
+          </div>
+        `).join('')}
+      </div>
+    </main>
+    <div class="btnbar">
+      <button class="btn ghost" onclick="nav('nuevo-tipo')">Anterior</button>
+      <button class="btn primary" ${!state.draft.equipo?'disabled':''} onclick="buildChecklists(); state.draft.checklistStep=0; nav('nuevo-checklist')">Siguiente</button>
+    </div>
+  `;
+}
+
+function renderNuevoChecklist(){
+  const idx = state.draft.checklistStep;
+  const cl = state.draft.checklists[idx];
+  const isLast = idx === state.draft.checklists.length-1;
+  return `
+    ${header('Checklist', `PASO 3 · ${idx+1} de ${state.draft.checklists.length}`, {back:"prevChecklist()"})}
+    <main>
+      ${stepRail(3)}
+      <h2 class="screen-title">${cl.title}</h2>
+      <p class="screen-sub">Marca cada punto como Cumple o N/A. Los puntos críticos (marcados en rojo) requieren evidencia fotográfica obligatoria.</p>
+      ${cl.items.map(it=>`
+        <div class="checklist-item ${it.critical?'critical':''}">
+          <div class="ci-top">
+            <div>
+              <div class="ci-name">${it.name}</div>
+              ${it.critical?'<div class="ci-crit-tag">Punto crítico</div>':''}
+            </div>
+            <div class="ci-opts">
+              <div class="pill ${it.status==='cumple'?'on cumple':''}" onclick="setItemStatus('${cl.key}','${it.id}','cumple')">Cumple</div>
+              <div class="pill ${it.status==='na'?'on na':''}" onclick="setItemStatus('${cl.key}','${it.id}','na')">N/A</div>
+            </div>
+          </div>
+          ${it.critical ? `
+          <div class="ci-photo">
+            <label class="photo-box ${it.photo?'attached':''}" style="${it.photo?`background-image:url(${it.photo});background-size:cover;background-position:center;`:''}">
+              ${it.photo?'':'📷'}
+              <input type="file" accept="image/*" capture="environment" style="display:none" onchange="attachPhoto('${cl.key}','${it.id}', this)">
+            </label>
+            <span>${it.photo?'Evidencia adjunta':'Evidencia fotográfica obligatoria'}</span>
+          </div>` : ''}
+        </div>
+      `).join('')}
+    </main>
+    <div class="btnbar">
+      <button class="btn ghost" onclick="prevChecklist()">Anterior</button>
+      <button class="btn primary" ${!checklistCanAdvance(cl)?'disabled':''} onclick="${isLast?"nav('nuevo-resumen')":"nextChecklist()"}">${isLast?'Guardar y continuar':'Guardar y continuar'}</button>
+    </div>
+  `;
+}
+function checklistCanAdvance(cl){
+  return cl.items.every(it=> it.status!==null && (!(it.critical && it.status==='cumple') || it.photo));
+}
+function setItemStatus(clKey,itemId,status){
+  const cl = state.draft.checklists.find(c=>c.key===clKey);
+  const it = cl.items.find(i=>i.id===itemId);
+  it.status = status;
+  if(status==='na') it.photo = null;
+  render();
+}
+async function attachPhoto(clKey,itemId,input){
+  if(!input.files || !input.files[0]) return;
+  const file = input.files[0];
+  showToast('Subiendo evidencia...');
+  const path = `${state.draft.id}/${itemId}-${Date.now()}.jpg`;
+  const { error } = await supabase.storage.from('evidencias').upload(path, file);
+  if(error){ console.error(error); showToast('No se pudo subir la foto'); return; }
+  const { data } = supabase.storage.from('evidencias').getPublicUrl(path);
+  const cl = state.draft.checklists.find(c=>c.key===clKey);
+  const it = cl.items.find(i=>i.id===itemId);
+  it.photo = data.publicUrl;
+  showToast('Evidencia adjuntada');
+  render();
+}
+function nextChecklist(){ state.draft.checklistStep++; nav('nuevo-checklist'); }
+function prevChecklist(){
+  if(state.draft.checklistStep>0){ state.draft.checklistStep--; nav('nuevo-checklist'); }
+  else nav(state.draft.tipos.includes('alturas') ? 'nuevo-equipo' : 'nuevo-tipo');
+}
+
+function renderResumen(){
+  const d = state.draft.datos;
+  const total = state.draft.checklists.length;
+  const done = completedChecklistsCount();
+  const critMissing = state.draft.checklists.reduce((s,cl)=>s+totalCriticalMissingPhoto(cl),0);
+  const ready = allChecklistsDone() && allCriticalPhotosOk();
+  return `
+    ${header('Resumen del APR', 'PASO 4 · '+state.draft.folio, {back:"nav('nuevo-checklist')"})}
+    <main>
+      ${stepRail(4)}
+      <h2 class="screen-title">Resumen del APR</h2>
+      <p class="screen-sub">Verifica la información antes de enviarla al jefe de EHS.</p>
+      <div class="card">
+        <div class="summary-row"><div class="k">Folio</div><div class="v folio">${state.draft.folio}</div></div>
+        <div class="summary-row"><div class="k">Empresa contratista</div><div class="v">${d.empresa}</div></div>
+        <div class="summary-row"><div class="k">Área</div><div class="v">${d.area}</div></div>
+        <div class="summary-row"><div class="k">Descripción</div><div class="v">${d.descripcion||'—'}</div></div>
+        <div class="summary-row"><div class="k">Tipo de trabajo</div><div class="v">${state.draft.tipos.map(t=>TYPE_LABEL[t]).join(', ')}</div></div>
+        <div class="summary-row"><div class="k">Checklists completados</div><div class="v">${done} de ${total} ${done===total?'✅':''}</div></div>
+        <div class="summary-row"><div class="k">Evidencia fotográfica crítica</div><div class="v">${critMissing===0?'Completa ✅':critMissing+' pendiente(s) ⚠️'}</div></div>
+        <div class="summary-row"><div class="k">Estatus actual</div><div class="v">${ready?'Listo para revisión EHS':'Incompleto'}</div></div>
+      </div>
+    </main>
+    <div class="btnbar">
+      <button class="btn ghost" onclick="nav('nuevo-checklist')">Anterior</button>
+      <button class="btn primary" ${!ready?'disabled':''} onclick="enviarAEhs()">Enviar a EHS</button>
+    </div>
+  `;
+}
+
+async function guardarAprEnBD(draft){
+  const { data: apr, error } = await supabase.from('aprs').insert({
+    folio: draft.folio,
+    empresa: draft.datos.empresa,
+    fecha: draft.datos.fecha || null,
+    hora_inicio: draft.datos.horaInicio || null,
+    trabajadores: draft.datos.trabajadores ? Number(draft.datos.trabajadores) : null,
+    area: draft.datos.area,
+    descripcion: draft.datos.descripcion,
+    responsable_interno: draft.datos.responsableInterno,
+    supervisor_seguridad: draft.datos.supervisorSeguridad,
+    tipos_trabajo: draft.tipos,
+    equipo: draft.equipo,
+    status: 'pendiente',
+  }).select().single();
+  if(error){ console.error(error); return null; }
+
+  for(const cl of draft.checklists){
+    const { data: checklist } = await supabase.from('checklists')
+      .insert({ apr_id: apr.id, clave: cl.key, titulo: cl.title })
+      .select().single();
+    for(const item of cl.items){
+      await supabase.from('checklist_items').insert({
+        checklist_id: checklist.id,
+        nombre: item.name,
+        critico: item.critical,
+        status: item.status,
+        foto_url: item.photo || null,
+      });
+    }
+  }
+
+  await supabase.from('notificaciones').insert({
+    apr_id: apr.id, para_rol: 'jefe_ehs',
+    texto: `Nuevo APR ${apr.folio} pendiente de aprobación (EHS)`,
+  });
+
+  return apr;
+}
+
+async function enviarAEhs(){
+  showToast('Enviando APR...');
+  state.draft.folio = await nextFolio();
+  const apr = await guardarAprEnBD(state.draft);
+  if(!apr){ showToast('No se pudo enviar el APR, intenta de nuevo'); return; }
+  state.draft.id = apr.id;
+  state.draft.status = 'pendiente';
+  await loadAprsFromDB();
+  await loadNotificaciones();
+  showToast('APR enviado a EHS');
+  nav('enviado');
+}
+
+function renderEnviado(){
+  return `
+    ${header('Enviado', '', {})}
+    <main style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding-top:60px;">
+      ${stepRail(5)}
+      <div style="font-size:52px;margin-bottom:14px;">📧</div>
+      <h2 class="screen-title">El APR se envía automáticamente</h2>
+      <p class="screen-sub">${state.draft.folio} fue enviado al jefe de EHS para su revisión y aprobación. Recibirás una notificación con el resultado.</p>
+    </main>
+    <div class="btnbar">
+      <button class="btn primary" onclick="nav('landing')">Volver al inicio</button>
+    </div>
+  `;
+}
+
+function renderRevision(){
+  const a = state.draft;
+  const d = a.datos;
+  return `
+    ${header('Revisión APR: '+a.folio, 'VISTA JEFE DE EHS', {back:"nav('landing')"})}
+    <main>
+      ${stepRail(6)}
+      <div class="card">
+        <div class="summary-row"><div class="k">Empresa contratista</div><div class="v">${d.empresa}</div></div>
+        <div class="summary-row"><div class="k">Área</div><div class="v">${d.area}</div></div>
+        <div class="summary-row"><div class="k">Descripción</div><div class="v">${d.descripcion||'—'}</div></div>
+        <div class="summary-row"><div class="k">Tipo de trabajo</div><div class="v">${a.tipos.map(t=>TYPE_LABEL[t]).join(', ')}</div></div>
+        <div class="summary-row"><div class="k">Checklists completados</div><div class="v">${completedChecklistsCount()} de ${a.checklists.length} ✅</div></div>
+        <div class="summary-row"><div class="k">Evidencia fotográfica</div><div class="v">Completada ✅</div></div>
+        <div class="summary-row"><div class="k">Estatus actual</div><div class="v">${statusBadge(a.status)}</div></div>
+      </div>
+      <div class="eyebrow-label">Comentarios (obligatorio si rechaza o solicita correcciones)</div>
+      <div class="card" style="padding:10px;">
+        <textarea id="ehs_comment" placeholder="Escribe tu comentario..."></textarea>
+      </div>
+      <div class="eyebrow-label" style="margin-top:18px;">Acciones del jefe de EHS</div>
+      <div style="display:flex;flex-direction:column;gap:9px;">
+        <button class="btn success" onclick="ehsDecision('autorizado')">✓ Aprobar APR</button>
+        <button class="btn danger" onclick="ehsDecision('rechazado')">✕ Rechazar APR</button>
+        <button class="btn outline-amber" onclick="ehsDecision('correccion')">✎ Solicitar correcciones</button>
+      </div>
+    </main>
+  `;
+}
+
+async function ehsDecision(decision){
+  const comment = val('ehs_comment');
+  if(decision!=='autorizado' && !comment){ showToast('El comentario es obligatorio para esta decisión'); return; }
+  await supabase.from('aprs').update({ status: decision }).eq('id', state.draft.id);
+  if(comment){
+    await supabase.from('comentarios').insert({ apr_id: state.draft.id, texto: comment });
+    state.draft.comments.push(comment);
+  }
+  const map = {autorizado:'aprobado', rechazado:'rechazado', correccion:'en corrección'};
+  await supabase.from('notificaciones').insert({
+    apr_id: state.draft.id, para_rol: 'solicitante',
+    texto: `APR ${state.draft.folio} ${map[decision]}`,
+  });
+  state.draft.status = decision;
+  await loadAprsFromDB();
+  showToast('Decisión enviada');
+  nav('resultado');
+}
+
+function renderResultado(){
+  const a = state.draft;
+  const info = {
+    borrador: {emoji:'📝', title:'En borrador', txt:'Aún no se ha enviado a revisión.'},
+    pendiente: {emoji:'⏳', title:'Pendiente de aprobación', txt:'El APR está esperando revisión del jefe de EHS.'},
+    autorizado: {emoji:'✅', title:'APR autorizado', txt:'El trabajo está autorizado para iniciar.'},
+    rechazado: {emoji:'❌', title:'APR rechazado', txt:'El trabajo no puede iniciar. Revisa comentarios.'},
+    correccion: {emoji:'✏️', title:'En corrección', txt:'Se requieren correcciones antes de la aprobación.'},
+    ejecucion: {emoji:'▶️', title:'En ejecución', txt:'El trabajo ha iniciado.'},
+    cerrado: {emoji:'🔒', title:'Cerrado', txt:'El trabajo ha finalizado y fue cerrado.'},
+  }[a.status];
+  const canStart = a.status==='autorizado';
+  const canClose = a.status==='ejecucion';
+  return `
+    ${header('Resultado final', a.folio, {back:"nav('landing')"})}
+    <main style="text-align:center;padding-top:20px;">
+      ${stepRail(7)}
+      <div style="font-size:56px;margin:10px 0;">${info.emoji}</div>
+      <h2 class="screen-title" style="text-align:center;">${info.title}</h2>
+      <p class="screen-sub">${info.txt}</p>
+      <div style="margin:14px 0;">${statusBadge(a.status)}</div>
+      ${a.comments.length ? `<div class="card" style="text-align:left;"><div class="eyebrow-label">Comentarios del jefe de EHS</div>${a.comments.map(c=>`<div style="font-size:13px;margin-bottom:6px;">"${c}"</div>`).join('')}</div>` : ''}
+      <div class="card" style="text-align:left;">
+        <div class="eyebrow-label">Firmas requeridas</div>
+        <div style="font-size:13px;line-height:1.9;">
+          🖊️ Contratista&nbsp;&nbsp;&nbsp;👤 Responsable interno<br>
+          🦺 Supervisor de seguridad&nbsp;&nbsp;&nbsp;✅ Jefe de EHS
+        </div>
+      </div>
+    </main>
+    <div class="btnbar" style="flex-direction:column;">
+      ${canStart?`<button class="btn success" onclick="a_setStatus('ejecucion')">Iniciar ejecución del trabajo</button>`:''}
+      ${canClose?`<button class="btn primary" onclick="a_setStatus('cerrado')">Cerrar APR</button>`:''}
+      <button class="btn ghost" style="flex:1;" onclick="nav('landing')">Volver al inicio</button>
+    </div>
+  `;
+}
+async function a_setStatus(s){
+  await supabase.from('aprs').update({ status: s }).eq('id', state.draft.id);
+  await supabase.from('notificaciones').insert({
+    apr_id: state.draft.id, para_rol: 'solicitante',
+    texto: `APR ${state.draft.folio} ${s==='ejecucion'?'en ejecución':'cerrado'}`,
+  });
+  state.draft.status = s;
+  await loadAprsFromDB();
+  render();
+}
+
+function renderNotificaciones(){
+  const icon = {pendiente:['🕐','var(--amber-bg)'], autorizado:['✓','var(--green-bg)'], rechazado:['✕','var(--red-bg)'], correccion:['✎','var(--amber-bg)'], ejecucion:['▶','var(--blue-bg)'], cerrado:['🔒','var(--purple-bg)']};
+  return `
+    ${header('Notificaciones', '', {back:"nav('landing')"})}
+    <main>
+      ${state.notifications.length ? state.notifications.map(n=>{
+        const [ic,bg] = icon[n.tag]||['•','#eee'];
+        return `<div class="notif-item"><div class="ic" style="background:${bg}">${ic}</div><div><div class="txt">${n.text}</div><div class="t">${n.time}</div></div></div>`;
+      }).join('') : '<div class="empty-state">No tienes notificaciones todavía.<br>Aquí verás avisos de aprobación, rechazo y correcciones.</div>'}
+    </main>
+  `;
+}
+
+function renderReglas(){
+  const rules = [
+    'Ningún APR puede autorizarse si falta información obligatoria.',
+    'Si un punto crítico tiene respuesta distinta a "Cumple", el APR no puede enviarse a aprobación.',
+    'Cada punto del checklist debe tener evidencia fotográfica obligatoria en puntos críticos.',
+    'El APR solo será autorizado por el jefe de EHS.',
+    'El sistema genera un folio único e inalterable para cada APR.',
+    'El APR debe contar con firmas digitales de: Contratista, Responsable interno, Supervisor de seguridad y Jefe de EHS.',
+    'El sistema genera PDF del APR con toda la información, checklists, fotos y firmas.',
+  ];
+  return `
+    ${header('Reglas clave', 'DEL SISTEMA', {back:"nav('landing')"})}
+    <main>
+      ${rules.map((r,i)=>`<div class="rule-item"><div class="n">${String(i+1).padStart(2,'0')}</div><div>${r}</div></div>`).join('')}
+    </main>
+  `;
+}
+
+/* ===================== ROUTER ===================== */
+function render(){
+  let html = '<div class="ticket-rail"></div>';
+  switch(state.screen){
+    case 'login': html += renderLogin(); break;
+    case 'landing': html += renderLanding(); break;
+    case 'mis-aprs': html += renderMisAprs(); break;
+    case 'nuevo-datos': html += renderNuevoDatos(); break;
+    case 'nuevo-tipo': html += renderNuevoTipo(); break;
+    case 'nuevo-equipo': html += renderNuevoEquipo(); break;
+    case 'nuevo-checklist': html += renderNuevoChecklist(); break;
+    case 'nuevo-resumen': html += renderResumen(); break;
+    case 'enviado': html += renderEnviado(); break;
+    case 'revision': html += renderRevision(); break;
+    case 'resultado': html += renderResultado(); break;
+    case 'notificaciones': html += renderNotificaciones(); break;
+    case 'reglas': html += renderReglas(); break;
+    default: html += renderLanding();
+  }
+  document.getElementById('app').innerHTML = html;
+}
+
+render();
+initApp();
+</script>
+</body>
+</html>
