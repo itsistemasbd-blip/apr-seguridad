@@ -518,7 +518,7 @@ const EQUIPO_LABEL = Object.fromEntries(EQUIPO_ALTURAS.map(t=>[t.key,t.label]));
 /* ===================== SUPABASE ===================== */
 const SUPABASE_URL = 'https://xcygrktfjjbcaonvgbel.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhjeWdya3RmampiY2FvbnZnYmVsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQxNDIzOTMsImV4cCI6MjA5OTcxODM5M30.m5Yi1ONp-Le_RxFxr1d2Cot0tA01UlEzAfufTRMT0UE';
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /* ===================== STATE ===================== */
 let state = {
@@ -534,7 +534,7 @@ let state = {
 
 async function nextFolio(){
   const y = new Date().getFullYear();
-  const { count } = await supabase.from('aprs').select('*', { count: 'exact', head: true });
+  const { count } = await sb.from('aprs').select('*', { count: 'exact', head: true });
   return 'APR-'+y+'-'+String((count||0)+1).padStart(4,'0');
 }
 
@@ -592,7 +592,7 @@ function nav(screen){ state.screen = screen; render(); window.scrollTo(0,0); }
 
 /* ===================== SESIÓN Y CARGA DE DATOS ===================== */
 async function initApp(){
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { session } } = await sb.auth.getSession();
   if(session){ state.user = session.user; await afterLogin(); }
   else { nav('login'); }
 }
@@ -601,14 +601,14 @@ async function doLogin(){
   const email = val('login_email');
   const password = val('login_password');
   if(!email || !password){ showToast('Escribe correo y contraseña'); return; }
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
   if(error){ showToast('Correo o contraseña incorrectos'); return; }
   state.user = data.user;
   await afterLogin();
 }
 
 async function doLogout(){
-  await supabase.auth.signOut();
+  await sb.auth.signOut();
   state.user = null; state.profile = null; state.aprs = []; state.notifications = [];
   nav('login');
 }
@@ -621,9 +621,9 @@ async function afterLogin(){
 }
 
 async function loadProfile(){
-  let { data } = await supabase.from('profiles').select('*').eq('id', state.user.id).single();
+  let { data } = await sb.from('profiles').select('*').eq('id', state.user.id).single();
   if(!data){
-    const ins = await supabase.from('profiles')
+    const ins = await sb.from('profiles')
       .insert({ id: state.user.id, nombre: state.user.email, rol: 'solicitante' })
       .select().single();
     data = ins.data;
@@ -640,7 +640,7 @@ async function setRole(r){
 }
 
 async function loadAprsFromDB(){
-  const { data, error } = await supabase.from('aprs')
+  const { data, error } = await sb.from('aprs')
     .select('id, folio, empresa, area, status')
     .order('created_at', { ascending: false });
   if(error){ console.error(error); return; }
@@ -659,7 +659,7 @@ function inferTag(texto){
 
 async function loadNotificaciones(){
   const rolDb = state.role==='ehs' ? 'jefe_ehs' : 'solicitante';
-  const { data, error } = await supabase.from('notificaciones')
+  const { data, error } = await sb.from('notificaciones')
     .select('*').eq('para_rol', rolDb)
     .order('created_at', { ascending:false }).limit(30);
   if(error){ console.error(error); return; }
@@ -670,9 +670,9 @@ async function loadNotificaciones(){
 }
 
 async function loadAprDetail(id){
-  const { data: apr } = await supabase.from('aprs').select('*').eq('id', id).single();
-  const { data: checklists } = await supabase.from('checklists').select('*, checklist_items(*)').eq('apr_id', id);
-  const { data: comentariosRows } = await supabase.from('comentarios').select('*').eq('apr_id', id).order('created_at');
+  const { data: apr } = await sb.from('aprs').select('*').eq('id', id).single();
+  const { data: checklists } = await sb.from('checklists').select('*, checklist_items(*)').eq('apr_id', id);
+  const { data: comentariosRows } = await sb.from('comentarios').select('*').eq('apr_id', id).order('created_at');
   state.draft = {
     id: apr.id,
     folio: apr.folio,
@@ -969,9 +969,9 @@ async function attachPhoto(clKey,itemId,input){
   const file = input.files[0];
   showToast('Subiendo evidencia...');
   const path = `${state.draft.id}/${itemId}-${Date.now()}.jpg`;
-  const { error } = await supabase.storage.from('evidencias').upload(path, file);
+  const { error } = await sb.storage.from('evidencias').upload(path, file);
   if(error){ console.error(error); showToast('No se pudo subir la foto'); return; }
-  const { data } = supabase.storage.from('evidencias').getPublicUrl(path);
+  const { data } = sb.storage.from('evidencias').getPublicUrl(path);
   const cl = state.draft.checklists.find(c=>c.key===clKey);
   const it = cl.items.find(i=>i.id===itemId);
   it.photo = data.publicUrl;
@@ -1015,7 +1015,7 @@ function renderResumen(){
 }
 
 async function guardarAprEnBD(draft){
-  const { data: apr, error } = await supabase.from('aprs').insert({
+  const { data: apr, error } = await sb.from('aprs').insert({
     folio: draft.folio,
     empresa: draft.datos.empresa,
     fecha: draft.datos.fecha || null,
@@ -1032,11 +1032,11 @@ async function guardarAprEnBD(draft){
   if(error){ console.error(error); return null; }
 
   for(const cl of draft.checklists){
-    const { data: checklist } = await supabase.from('checklists')
+    const { data: checklist } = await sb.from('checklists')
       .insert({ apr_id: apr.id, clave: cl.key, titulo: cl.title })
       .select().single();
     for(const item of cl.items){
-      await supabase.from('checklist_items').insert({
+      await sb.from('checklist_items').insert({
         checklist_id: checklist.id,
         nombre: item.name,
         critico: item.critical,
@@ -1046,7 +1046,7 @@ async function guardarAprEnBD(draft){
     }
   }
 
-  await supabase.from('notificaciones').insert({
+  await sb.from('notificaciones').insert({
     apr_id: apr.id, para_rol: 'jefe_ehs',
     texto: `Nuevo APR ${apr.folio} pendiente de aprobación (EHS)`,
   });
@@ -1115,13 +1115,13 @@ function renderRevision(){
 async function ehsDecision(decision){
   const comment = val('ehs_comment');
   if(decision!=='autorizado' && !comment){ showToast('El comentario es obligatorio para esta decisión'); return; }
-  await supabase.from('aprs').update({ status: decision }).eq('id', state.draft.id);
+  await sb.from('aprs').update({ status: decision }).eq('id', state.draft.id);
   if(comment){
-    await supabase.from('comentarios').insert({ apr_id: state.draft.id, texto: comment });
+    await sb.from('comentarios').insert({ apr_id: state.draft.id, texto: comment });
     state.draft.comments.push(comment);
   }
   const map = {autorizado:'aprobado', rechazado:'rechazado', correccion:'en corrección'};
-  await supabase.from('notificaciones').insert({
+  await sb.from('notificaciones').insert({
     apr_id: state.draft.id, para_rol: 'solicitante',
     texto: `APR ${state.draft.folio} ${map[decision]}`,
   });
@@ -1169,8 +1169,8 @@ function renderResultado(){
   `;
 }
 async function a_setStatus(s){
-  await supabase.from('aprs').update({ status: s }).eq('id', state.draft.id);
-  await supabase.from('notificaciones').insert({
+  await sb.from('aprs').update({ status: s }).eq('id', state.draft.id);
+  await sb.from('notificaciones').insert({
     apr_id: state.draft.id, para_rol: 'solicitante',
     texto: `APR ${state.draft.folio} ${s==='ejecucion'?'en ejecución':'cerrado'}`,
   });
