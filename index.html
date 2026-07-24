@@ -15,6 +15,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/JsBarcode/3.11.5/JsBarcode.all.min.js"></script>
 <style>
   :root{
     --navy: #172038;
@@ -975,6 +977,7 @@ function renderLanding(){
       <div class="hero-cta">
         <button class="btn primary" onclick="startDraft(); nav('nuevo-datos')">+ Crear nuevo APR</button>
         <button class="btn line" onclick="nav('mis-aprs')">Mis APR (${state.aprs.length})</button>
+        <button class="btn line" onclick="nav('buscar')">🔍 Buscar por folio</button>
       </div>
     </div>
     <div class="landing-body">
@@ -1018,6 +1021,38 @@ function renderMisAprs(){
       ${state.aprs.length ? state.aprs.map(a=>aprMiniCard(a)).join('') : '<div class="empty-state">Aún no has creado ningún APR.<br>Toca "Crear nuevo APR" para empezar.</div>'}
     </main>
   `;
+}
+
+function renderBuscar(){
+  const results = state.searchResults || [];
+  return `
+    ${header('Buscar APR', 'POR FOLIO', {back:"nav('landing')"})}
+    <main>
+      <div class="card" style="display:flex;gap:8px;padding:10px;">
+        <input type="text" id="folio_busqueda" placeholder="Ej. APR-2026-0004" value="${state.searchQuery||''}" style="flex:1;border:1.5px solid var(--line);border-radius:9px;padding:9px 11px;font-size:14px;background:#fbfaf7;" onkeydown="if(event.key==='Enter') buscarPorFolio()">
+        <button class="btn primary" style="flex:0 0 auto;padding:9px 16px;" onclick="buscarPorFolio()">Buscar</button>
+      </div>
+      ${state.searchDone ? (
+        results.length
+          ? results.map(a=>aprMiniCard(a)).join('')
+          : '<div class="empty-state">No se encontró ningún APR con ese folio.</div>'
+      ) : '<div class="empty-state">Escribe un folio (o parte de él) y toca Buscar.</div>'}
+    </main>
+  `;
+}
+
+async function buscarPorFolio(){
+  const q = val('folio_busqueda');
+  state.searchQuery = q;
+  if(!q){ showToast('Escribe un folio para buscar'); return; }
+  const { data, error } = await sb.from('aprs')
+    .select('id, folio, empresa, area, status')
+    .ilike('folio', `%${q}%`)
+    .order('created_at', { ascending:false });
+  if(error){ console.error(error); showToast('Error al buscar'); return; }
+  state.searchResults = (data||[]).map(r=>({ id:r.id, folio:r.folio, status:r.status, datos:{empresa:r.empresa, area:r.area} }));
+  state.searchDone = true;
+  render();
 }
 
 function renderNuevoDatos(){
@@ -1705,6 +1740,7 @@ function renderResultado(){
     <div class="btnbar" style="flex-direction:column;">
       ${canStart?`<button class="btn success" onclick="a_setStatus('ejecucion')">Iniciar ejecución del trabajo</button>`:''}
       ${canDeliver?`<button class="btn primary" onclick="abrirEntrega()">Registrar entrega de la tarea</button>`:''}
+      ${state.isAdmin?`<button class="btn ghost" onclick="generarPDF()">📄 Descargar PDF del APR</button>`:''}
       <button class="btn ghost" style="flex:1;" onclick="nav('landing')">Volver al inicio</button>
     </div>
   `;
@@ -1867,6 +1903,167 @@ function renderEntregaResumen(entrega){
   `;
 }
 
+function generarBarcodeDataUrl(texto){
+  const canvas = document.createElement('canvas');
+  JsBarcode(canvas, texto, { format:'CODE128', displayValue:true, fontSize:14, height:40, margin:6 });
+  return canvas.toDataURL('image/png');
+}
+
+function generarPDF(){
+  if(!state.isAdmin){ showToast('Solo el Jefe de Seguridad puede descargar el PDF'); return; }
+  const a = state.draft;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'mm', format:'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const marginX = 15;
+  let y = 15;
+
+  function ensureSpace(needed){
+    if(y + needed > 285){ doc.addPage(); y = 15; }
+  }
+  function titulo(texto){
+    ensureSpace(10);
+    doc.setFont(undefined,'bold'); doc.setFontSize(12);
+    doc.text(texto, marginX, y);
+    y += 6;
+    doc.setFont(undefined,'normal'); doc.setFontSize(10);
+  }
+  function linea(label, valor){
+    ensureSpace(6);
+    doc.setFont(undefined,'bold'); doc.text(String(label)+':', marginX, y);
+    doc.setFont(undefined,'normal');
+    const texto = doc.splitTextToSize(String(valor||'—'), pageW - marginX*2 - 45);
+    doc.text(texto, marginX+45, y);
+    y += 5 * Math.max(1, texto.length);
+  }
+  function parrafo(texto){
+    ensureSpace(6);
+    const lineas = doc.splitTextToSize(String(texto||'—'), pageW - marginX*2);
+    doc.text(lineas, marginX, y);
+    y += 5 * lineas.length;
+  }
+  function firmaImg(label, dataUrl, nombre){
+    ensureSpace(30);
+    doc.setFont(undefined,'bold'); doc.text(`${label}${nombre?' — '+nombre:''}`, marginX, y);
+    y += 4;
+    if(dataUrl){
+      try{ doc.addImage(dataUrl, 'PNG', marginX, y, 55, 22); }catch(e){}
+    }
+    y += 26;
+  }
+
+  // Encabezado
+  doc.setFont(undefined,'bold'); doc.setFontSize(15);
+  doc.text('Análisis Previo de Riesgo (APR)', marginX, y);
+  y += 8;
+  doc.setFontSize(10); doc.setFont(undefined,'normal');
+  const barcode = generarBarcodeDataUrl(a.folio);
+  doc.addImage(barcode, 'PNG', pageW - marginX - 55, 12, 55, 20);
+  y += 2;
+
+  titulo('Datos generales');
+  linea('Folio', a.folio);
+  linea('Empresa contratista', a.datos.empresa);
+  linea('Fecha', a.datos.fecha); linea('Hora de inicio', a.datos.horaInicio);
+  linea('Área', a.datos.area);
+  linea('Descripción', a.datos.descripcion);
+  linea('Responsable interno', a.datos.responsableInterno);
+  linea('Supervisor de seguridad', a.datos.supervisorSeguridad);
+  linea('Tipo de trabajo', (a.tipos||[]).map(t=>TYPE_LABEL[t]).join(', '));
+  linea('Estatus', a.status);
+  y += 3;
+
+  if(a.clima && a.clima.aplica!==null){
+    titulo('Condición meteorológica');
+    linea('¿Aplica?', a.clima.aplica?'Sí':'No');
+    if(a.clima.aplica) linea('Medidas', a.clima.medidas);
+    y += 3;
+  }
+
+  if(a.pasos && a.pasos.length){
+    titulo('Análisis de riesgo por paso');
+    a.pasos.forEach((p,i)=>{
+      const riesgo = calcRiesgo(p.s,p.f,p.p,p.pr);
+      linea(`Paso ${i+1}`, p.descripcion);
+      linea('Peligro', p.peligro);
+      linea('S / F / P / PR', `${p.s||'—'} / ${p.f||'—'} / ${p.p||'—'} / ${p.pr||'—'}  →  Riesgo: ${riesgo!==null?riesgo:'—'}`);
+      linea('Control', p.controles);
+      y += 2;
+    });
+  }
+
+  if(a.checklists && a.checklists.length){
+    titulo('Checklists');
+    a.checklists.forEach(cl=>{
+      ensureSpace(6);
+      doc.setFont(undefined,'bold'); doc.text(cl.title, marginX, y); y += 5;
+      doc.setFont(undefined,'normal');
+      cl.items.forEach(it=>{
+        linea((it.critical?'[Crítico] ':'')+it.name, it.status==='cumple'?'Cumple':(it.status==='na'?'N/A':'Sin responder'));
+      });
+      y += 2;
+    });
+  }
+
+  if(a.epp && a.epp.length){
+    titulo('Equipo de Protección Personal');
+    a.epp.forEach(it=> linea(it.nombre, it.modelo||'—'));
+    y += 3;
+  }
+
+  if(a.residuos && a.residuos.some(r=>r.descripcion||r.control)){
+    titulo('Impacto ambiental — residuos');
+    a.residuos.filter(r=>r.descripcion||r.control).forEach(r=>{
+      linea('Residuo', r.descripcion);
+      linea('Control', r.control);
+    });
+    y += 3;
+  }
+
+  if(a.energia && a.energia.aplica!==null && a.energia.aplica!==undefined){
+    titulo('Bloqueo de energías');
+    linea('¿Aplica?', a.energia.aplica?'Sí':'No');
+    if(a.energia.aplica){
+      linea('¿Cuál?', a.energia.cual);
+      linea('Bloqueo aplicado correctamente', a.energia.bloqueoOk?'Sí':'No');
+      linea('Energía remanente', a.energia.remanente);
+    }
+    y += 3;
+  }
+
+  if(a.comments && a.comments.length){
+    titulo('Comentarios del Jefe de Seguridad');
+    a.comments.forEach(c=> parrafo('"'+c+'"'));
+    y += 3;
+  }
+
+  titulo('Firmas de autorización');
+  if(a.firmas){
+    firmaImg('Contratista', a.firmas.contratista, a.firmasNombres && a.firmasNombres.contratista);
+    firmaImg('Responsable Interno', a.firmas.responsable_interno, a.firmasNombres && a.firmasNombres.responsable_interno);
+    firmaImg('Supervisor de Seguridad', a.firmas.supervisor, a.firmasNombres && a.firmasNombres.supervisor);
+  }
+  firmaImg('Jefe de Seguridad', a.firmaJefeSeguridad, a.firmaJefeSeguridadNombre);
+
+  if(a.entrega){
+    titulo('Entrega de la tarea');
+    linea('Condiciones de operación segura', a.entrega.seguro?'Sí':'No');
+    linea('Orden y limpieza', a.entrega.orden?'Sí':'No');
+    linea('Residuos en su contenedor', a.entrega.residuosOk?'Sí':'No');
+    linea('Cumple lo solicitado', a.entrega.cumple?'Sí':'No');
+    if(a.entrega.medidas) linea('Medidas de control', a.entrega.medidas);
+    y += 2;
+    (a.entrega.involucrados||[]).forEach(inv=> firmaImg('Involucrado', inv.firma, inv.nombre));
+    if(a.entrega.inspeccion){
+      firmaImg('Inspecciona — Responsable de la tarea', a.entrega.inspeccion.tarea.firma, a.entrega.inspeccion.tarea.nombre);
+      firmaImg('Inspecciona — Responsable del área', a.entrega.inspeccion.area.firma, a.entrega.inspeccion.area.nombre);
+      firmaImg('Inspecciona — EHS', a.entrega.inspeccion.ehs.firma, a.entrega.inspeccion.ehs.nombre);
+    }
+  }
+
+  doc.save(`${a.folio}.pdf`);
+}
+
 function renderNotificaciones(){
   const icon = {pendiente:['🕐','var(--amber-bg)'], autorizado:['✓','var(--green-bg)'], rechazado:['✕','var(--red-bg)'], correccion:['✎','var(--amber-bg)'], ejecucion:['▶','var(--blue-bg)'], cerrado:['🔒','var(--purple-bg)']};
   return `
@@ -1965,6 +2162,7 @@ function render(){
     case 'login': html += renderLogin(); break;
     case 'landing': html += renderLanding(); break;
     case 'mis-aprs': html += renderMisAprs(); break;
+    case 'buscar': html += renderBuscar(); break;
     case 'nuevo-datos': html += renderNuevoDatos(); break;
     case 'nuevo-riesgo': html += renderNuevoRiesgo(); break;
     case 'nuevo-tipo': html += renderNuevoTipo(); break;
