@@ -1441,7 +1441,7 @@ async function crearUsuarioAdmin(){
   if(!email || !password || !rol){ showToast('Completa correo, contraseña y rol'); return; }
   if(password.length < 6){ showToast('La contraseña debe tener al menos 6 caracteres'); return; }
   showToast('Creando usuario...');
-  const { data, error } = await sb.functions.invoke('create-user', { body: { email, password, nombre, rol } });
+  const { data, error } = await sb.functions.invoke('super-endpoint', { body: { email, password, nombre, rol } });
   if(error || (data && data.error)){
     showToast('No se pudo crear: ' + ((data && data.error) || error.message));
     console.error(error || (data && data.error));
