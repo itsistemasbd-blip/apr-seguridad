@@ -1949,149 +1949,267 @@ function generarPDFInterno(){
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit:'mm', format:'a4' });
   const pageW = doc.internal.pageSize.getWidth();
-  const marginX = 15;
-  let y = 15;
+  const pageH = doc.internal.pageSize.getHeight();
+  const marginX = 12;
+  const usableW = pageW - marginX*2;
+  let y = 12;
 
-  function ensureSpace(needed){
-    if(y + needed > 285){ doc.addPage(); y = 15; }
+  function saltoSiNecesario(alto){
+    if(y + alto > pageH - 12){ doc.addPage(); y = 12; }
   }
-  function titulo(texto){
-    ensureSpace(10);
-    doc.setFont(undefined,'bold'); doc.setFontSize(12);
-    doc.text(texto, marginX, y);
-    y += 6;
-    doc.setFont(undefined,'normal'); doc.setFontSize(10);
+
+  function tituloSeccion(texto){
+    saltoSiNecesario(9);
+    doc.setFillColor(23,32,56);
+    doc.rect(marginX, y, usableW, 6.5, 'F');
+    doc.setTextColor(255,255,255);
+    doc.setFont(undefined,'bold'); doc.setFontSize(9.5);
+    doc.text(texto.toUpperCase(), marginX+2, y+4.6);
+    doc.setTextColor(0,0,0);
+    y += 6.5 + 2;
   }
-  function linea(label, valor){
-    ensureSpace(6);
-    doc.setFont(undefined,'bold'); doc.text(String(label)+':', marginX, y);
+
+  // Dibuja una tabla simple: rows = array de arrays de texto (string), colWidths = array de anchos en mm.
+  // headerRows = cuántas filas iniciales van con fondo gris y negritas.
+  function tabla(x0, colWidths, rows, headerRows){
+    headerRows = headerRows || 0;
+    const totalW = colWidths.reduce((s,w)=>s+w,0);
+    const pad = 1.4, lineH = 3.6;
+    doc.setFontSize(8);
+    rows.forEach((row, ri)=>{
+      const cellLines = row.map((cell,ci)=>doc.splitTextToSize(String(cell==null?'':cell), colWidths[ci]-2*pad));
+      const rowH = Math.max(2, ...cellLines.map(l=>l.length)) * lineH + 2*pad;
+      saltoSiNecesario(rowH);
+      let cx = x0;
+      const isHeader = ri < headerRows;
+      if(isHeader){ doc.setFillColor(232,231,224); doc.rect(x0, y, totalW, rowH, 'F'); }
+      doc.setFont(undefined, isHeader?'bold':'normal');
+      row.forEach((cell,ci)=>{
+        doc.rect(cx, y, colWidths[ci], rowH);
+        doc.text(cellLines[ci], cx+pad, y+pad+2.6);
+        cx += colWidths[ci];
+      });
+      y += rowH;
+    });
     doc.setFont(undefined,'normal');
-    const texto = doc.splitTextToSize(String(valor||'—'), pageW - marginX*2 - 45);
-    doc.text(texto, marginX+45, y);
-    y += 5 * Math.max(1, texto.length);
-  }
-  function parrafo(texto){
-    ensureSpace(6);
-    const lineas = doc.splitTextToSize(String(texto||'—'), pageW - marginX*2);
-    doc.text(lineas, marginX, y);
-    y += 5 * lineas.length;
-  }
-  function firmaImg(label, dataUrl, nombre){
-    ensureSpace(30);
-    doc.setFont(undefined,'bold'); doc.text(`${label}${nombre?' — '+nombre:''}`, marginX, y);
-    y += 4;
-    if(dataUrl){
-      try{ doc.addImage(dataUrl, 'PNG', marginX, y, 55, 22); }catch(e){}
-    }
-    y += 26;
   }
 
-  // Encabezado
-  doc.setFont(undefined,'bold'); doc.setFontSize(15);
-  doc.text('Análisis Previo de Riesgo (APR)', marginX, y);
-  y += 8;
-  doc.setFontSize(10); doc.setFont(undefined,'normal');
-  const barcode = generarBarcodeDataUrl(a.folio);
-  doc.addImage(barcode, 'PNG', pageW - marginX - 55, 12, 55, 20);
+  // Casilla tipo "campo: valor" en una caja con borde (para datos generales)
+  function camposEnFila(campos, altoMin){
+    altoMin = altoMin || 12;
+    saltoSiNecesario(altoMin);
+    const w = usableW / campos.length;
+    campos.forEach((c,i)=>{
+      doc.rect(marginX + i*w, y, w, altoMin);
+      doc.setFont(undefined,'bold'); doc.setFontSize(7.5);
+      doc.text(c.label, marginX + i*w + 1.5, y + 4);
+      doc.setFont(undefined,'normal'); doc.setFontSize(8.5);
+      const val = doc.splitTextToSize(String(c.valor||'—'), w-3);
+      doc.text(val, marginX + i*w + 1.5, y + 8.5);
+    });
+    y += altoMin;
+  }
+
+  function preguntaSiNo(pregunta, valor){
+    saltoSiNecesario(7);
+    doc.setFont(undefined,'normal'); doc.setFontSize(8.5);
+    const texto = doc.splitTextToSize(pregunta, usableW - 22);
+    doc.text(texto, marginX, y+3);
+    const cajaY = y;
+    doc.setFontSize(8);
+    doc.rect(marginX+usableW-18, cajaY, 8, 5);
+    doc.text('SI', marginX+usableW-16.3, cajaY+3.6);
+    doc.rect(marginX+usableW-9, cajaY, 8, 5);
+    doc.text('NO', marginX+usableW-7.6, cajaY+3.6);
+    if(valor===true){ doc.setFont(undefined,'bold'); doc.text('X', marginX+usableW-15.3, cajaY+3.6); doc.setFont(undefined,'normal'); }
+    if(valor===false){ doc.setFont(undefined,'bold'); doc.text('X', marginX+usableW-6.3, cajaY+3.6); doc.setFont(undefined,'normal'); }
+    y += Math.max(6, texto.length*4) + 1.5;
+  }
+
+  function filaFirma(nombreLabel, nombre, firmaDataUrl, w1, w2, rowH){
+    saltoSiNecesario(rowH);
+    const x0 = marginX;
+    doc.rect(x0, y, w1, rowH);
+    doc.rect(x0+w1, y, w2, rowH);
+    doc.setFont(undefined,'bold'); doc.setFontSize(7.5);
+    doc.text(nombreLabel, x0+1.5, y+4);
+    doc.setFont(undefined,'normal'); doc.setFontSize(8.5);
+    doc.text(String(nombre||'—'), x0+1.5, y+9);
+    if(firmaDataUrl){
+      try{ doc.addImage(firmaDataUrl, 'PNG', x0+w1+2, y+2, w2-4, rowH-4); }catch(e){}
+    } else {
+      doc.setFontSize(7); doc.text('(sin firma)', x0+w1+2, y+rowH/2+1);
+    }
+    y += rowH;
+  }
+
+  /* ===== ENCABEZADO ===== */
+  doc.setFont(undefined,'bold'); doc.setFontSize(13);
+  doc.text('SKF APR — "Análisis Previo de Riesgos"', marginX, y+5);
+  doc.setFontSize(10);
+  doc.text(`Folio: ${a.folio}`, marginX, y+11);
+  try{ doc.addImage(generarBarcodeDataUrl(a.folio), 'PNG', pageW-marginX-50, y-2, 50, 16); }catch(e){}
+  y += 16;
+
+  doc.setFillColor(255,247,225);
+  saltoSiNecesario(14);
+  doc.rect(marginX, y, usableW, 14, 'F');
+  doc.setFont(undefined,'bold'); doc.setFontSize(7);
+  const advertencia = doc.splitTextToSize('¡ADVERTENCIA! ESTE APR SE DEBE ELABORAR PREVIO A LA EJECUCIÓN DE ACTIVIDADES POR EL RESPONSABLE DEL TRABAJO JUNTO CON EL PERSONAL INVOLUCRADO QUE REALIZARÁ LA TAREA, INVOLUCRANDO AL RESPONSABLE QUE SOLICITA EL TRABAJO. CUALQUIER PASO NUEVO O CAMBIO NO DESCRITO EN EL ANÁLISIS REQUIERE DETENER LA ACTIVIDAD Y EVALUARLA NUEVAMENTE.', usableW-4);
+  doc.text(advertencia, marginX+2, y+4);
+  doc.setFont(undefined,'normal');
+  y += 16;
+
+  /* ===== DATOS GENERALES ===== */
+  tituloSeccion('Datos generales');
+  camposEnFila([
+    {label:'Fecha de elaboración', valor:a.datos.fecha},
+    {label:'Hora', valor:a.datos.horaInicio},
+    {label:'Estatus', valor:a.status},
+  ]);
+  camposEnFila([
+    {label:'Compañía', valor:a.datos.empresa},
+    {label:'Trabajo a realizar', valor:a.datos.descripcion},
+  ], 16);
+  camposEnFila([
+    {label:'Área donde se realiza la tarea', valor:a.datos.area},
+    {label:'Tipo de trabajo', valor:(a.tipos||[]).map(t=>TYPE_LABEL[t]).join(', ')},
+  ], 14);
+  camposEnFila([
+    {label:'Responsable interno', valor:a.datos.responsableInterno},
+    {label:'Supervisor de seguridad', valor:a.datos.supervisorSeguridad},
+    {label:'N.º trabajadores', valor:a.datos.trabajadores},
+  ]);
+  y += 2;
+  if(a.clima){
+    preguntaSiNo('¿Alguna situación meteorológica (lluvia, viento, tormentas eléctricas) lo pone en peligro?', a.clima.aplica);
+    if(a.clima.aplica){ doc.setFontSize(8); doc.text(doc.splitTextToSize('¿Qué medidas se van a tomar? '+(a.clima.medidas||'—'), usableW), marginX, y+3); y += 8; }
+  }
   y += 2;
 
-  titulo('Datos generales');
-  linea('Folio', a.folio);
-  linea('Empresa contratista', a.datos.empresa);
-  linea('Fecha', a.datos.fecha); linea('Hora de inicio', a.datos.horaInicio);
-  linea('Área', a.datos.area);
-  linea('Descripción', a.datos.descripcion);
-  linea('Responsable interno', a.datos.responsableInterno);
-  linea('Supervisor de seguridad', a.datos.supervisorSeguridad);
-  linea('Tipo de trabajo', (a.tipos||[]).map(t=>TYPE_LABEL[t]).join(', '));
-  linea('Estatus', a.status);
-  y += 3;
-
-  if(a.clima && a.clima.aplica!==null){
-    titulo('Condición meteorológica');
-    linea('¿Aplica?', a.clima.aplica?'Sí':'No');
-    if(a.clima.aplica) linea('Medidas', a.clima.medidas);
-    y += 3;
-  }
-
+  /* ===== SECUENCIA DE ACTIVIDADES / RIESGO ===== */
   if(a.pasos && a.pasos.length){
-    titulo('Análisis de riesgo por paso');
+    tituloSeccion('Secuencia de actividades y evaluación de riesgo');
+    const header = ['#','Secuencia de actividad','Peligro potencial','S','F','P','PR','IP','Medidas de control'];
+    const widths = [6, 40, 40, 8, 8, 8, 10, 8, usableW-6-40-40-8-8-8-10-8];
+    const rows = [header];
     a.pasos.forEach((p,i)=>{
       const riesgo = calcRiesgo(p.s,p.f,p.p,p.pr);
-      linea(`Paso ${i+1}`, p.descripcion);
-      linea('Peligro', p.peligro);
-      linea('S / F / P / PR', `${p.s||'—'} / ${p.f||'—'} / ${p.p||'—'} / ${p.pr||'—'}  →  Riesgo: ${riesgo!==null?riesgo:'—'}`);
-      linea('Control', p.controles);
-      y += 2;
+      rows.push([String(i+1), p.descripcion, p.peligro, p.s||'—', p.f||'—', p.p||'—', p.pr||'—', riesgo!==null?String(riesgo):'—', p.controles]);
     });
+    tabla(marginX, widths, rows, 1);
+    y += 2;
+
+    // Matriz de referencia (método de evaluación de riesgos)
+    tituloSeccion('Método de evaluación de riesgos (referencia)');
+    const mw = [16, 10,10, 10,10, 10,10];
+    tabla(marginX, mw, [
+      ['Severidad / F', 'P1','P1', 'P2','P2', 'P3','P3'],
+      ['', 'PR1','PR2', 'PR1','PR2', 'PR1','PR2'],
+      ['S1 / F1', '1','1', '1','2', '2','2'],
+      ['S1 / F2', '1','2', '2','2', '2','4'],
+      ['S2 / F1', '2','2', '2','4', '4','4'],
+      ['S2 / F2', '3','4', '4','5', '5','6'],
+    ], 2);
+    doc.setFontSize(7);
+    saltoSiNecesario(14);
+    doc.text(doc.splitTextToSize('S1: Lesión leve. S2: Lesión seria. F1: ≤2 veces/turno o <15 min. F2: >2 veces/turno o >15 min. P1: controles robustos. P2: falló hace +3 meses. P3: falló hace -3 meses. PR1: posible bajo ciertas condiciones. PR2: imposible.', usableW), marginX, y+3);
+    y += 12;
   }
 
+  /* ===== CHECKLISTS ===== */
   if(a.checklists && a.checklists.length){
-    titulo('Checklists');
     a.checklists.forEach(cl=>{
-      ensureSpace(6);
-      doc.setFont(undefined,'bold'); doc.text(cl.title, marginX, y); y += 5;
-      doc.setFont(undefined,'normal');
-      cl.items.forEach(it=>{
-        linea((it.critical?'[Crítico] ':'')+it.name, it.status==='cumple'?'Cumple':(it.status==='na'?'N/A':'Sin responder'));
-      });
+      tituloSeccion(cl.title);
+      const rows = [['Punto de revisión','Crítico','Cumple / N.A.']];
+      cl.items.forEach(it=> rows.push([it.name, it.critical?'Sí':'No', it.status==='cumple'?'Cumple':(it.status==='na'?'N/A':'—')]));
+      tabla(marginX, [usableW-40-30, 30, 30], rows, 1);
       y += 2;
     });
   }
 
+  /* ===== EPP ===== */
+  tituloSeccion('Equipo de Protección Personal (EPP)');
+  doc.setFontSize(7.5);
+  doc.text(doc.splitTextToSize('Seleccione el Equipo de Protección Personal que se requiere para realizar la tarea y especifique el modelo.', usableW), marginX, y+2);
+  y += 6;
   if(a.epp && a.epp.length){
-    titulo('Equipo de Protección Personal');
-    a.epp.forEach(it=> linea(it.nombre, it.modelo||'—'));
-    y += 3;
+    tabla(marginX, [usableW*0.5, usableW*0.5], [['EPP','Modelo'], ...a.epp.map(it=>[it.nombre, it.modelo||'—'])], 1);
+  } else {
+    doc.setFontSize(8); doc.text('No se especificó EPP.', marginX, y+3); y += 6;
   }
+  y += 2;
 
-  if(a.residuos && a.residuos.some(r=>r.descripcion||r.control)){
-    titulo('Impacto ambiental — residuos');
-    a.residuos.filter(r=>r.descripcion||r.control).forEach(r=>{
-      linea('Residuo', r.descripcion);
-      linea('Control', r.control);
-    });
-    y += 3;
+  /* ===== IMPACTO AMBIENTAL ===== */
+  tituloSeccion('Impacto ambiental — control de residuos');
+  doc.setFontSize(7.5);
+  doc.text(doc.splitTextToSize('Impacto ambiental. Control de residuos peligrosos, residuos de manejo especial, basura.', usableW), marginX, y+2);
+  y += 6;
+  const residuosValidos = (a.residuos||[]).filter(r=>r.descripcion||r.control);
+  if(residuosValidos.length){
+    tabla(marginX, [8, usableW*0.5-4, usableW*0.5-4], [['#','Descripción','Medidas de control'], ...residuosValidos.map((r,i)=>[String(i+1), r.descripcion, r.control])], 1);
+  } else {
+    doc.setFontSize(8); doc.text('No se registraron residuos.', marginX, y+3); y += 6;
   }
+  y += 2;
 
-  if(a.energia && a.energia.aplica!==null && a.energia.aplica!==undefined){
-    titulo('Bloqueo de energías');
-    linea('¿Aplica?', a.energia.aplica?'Sí':'No');
+  /* ===== BLOQUEO DE ENERGÍAS ===== */
+  if(a.energia){
+    tituloSeccion('Bloqueo de energías');
+    preguntaSiNo('¿Hay fuentes de energía (eléctrica, hidráulica, neumática) que representen riesgo y deban bloquearse?', a.energia.aplica);
     if(a.energia.aplica){
-      linea('¿Cuál?', a.energia.cual);
-      linea('Bloqueo aplicado correctamente', a.energia.bloqueoOk?'Sí':'No');
-      linea('Energía remanente', a.energia.remanente);
+      doc.setFontSize(8);
+      doc.text(doc.splitTextToSize('¿Cuál? '+(a.energia.cual||'—'), usableW), marginX, y+3); y += 7;
+      preguntaSiNo('¿Se cuenta con el equipo de bloqueo y candadeo adecuado, aplicado correctamente?', a.energia.bloqueoOk);
+      doc.text(doc.splitTextToSize('Energía remanente: '+(a.energia.remanente||'—'), usableW), marginX, y+3); y += 7;
     }
-    y += 3;
+    y += 2;
   }
 
   if(a.comments && a.comments.length){
-    titulo('Comentarios del Jefe de Seguridad');
-    a.comments.forEach(c=> parrafo('"'+c+'"'));
-    y += 3;
-  }
-
-  titulo('Firmas de autorización');
-  if(a.firmas){
-    firmaImg('Contratista', a.firmas.contratista, a.firmasNombres && a.firmasNombres.contratista);
-    firmaImg('Responsable Interno', a.firmas.responsable_interno, a.firmasNombres && a.firmasNombres.responsable_interno);
-    firmaImg('Supervisor de Seguridad', a.firmas.supervisor, a.firmasNombres && a.firmasNombres.supervisor);
-  }
-  firmaImg('Jefe de Seguridad', a.firmaJefeSeguridad, a.firmaJefeSeguridadNombre);
-
-  if(a.entrega){
-    titulo('Entrega de la tarea');
-    linea('Condiciones de operación segura', a.entrega.seguro?'Sí':'No');
-    linea('Orden y limpieza', a.entrega.orden?'Sí':'No');
-    linea('Residuos en su contenedor', a.entrega.residuosOk?'Sí':'No');
-    linea('Cumple lo solicitado', a.entrega.cumple?'Sí':'No');
-    if(a.entrega.medidas) linea('Medidas de control', a.entrega.medidas);
+    tituloSeccion('Comentarios del Jefe de Seguridad');
+    doc.setFontSize(8);
+    a.comments.forEach(c=>{
+      saltoSiNecesario(6);
+      const t = doc.splitTextToSize('"'+c+'"', usableW);
+      doc.text(t, marginX, y+3); y += 5*t.length;
+    });
     y += 2;
-    (a.entrega.involucrados||[]).forEach(inv=> firmaImg('Involucrado', inv.firma, inv.nombre));
+  }
+
+  /* ===== AUTORIZACIONES ===== */
+  tituloSeccion('Autorizaciones para el trabajo');
+  const w1 = 55, w2 = usableW - 55;
+  filaFirma('Responsable de realizar la tarea (Contratista)', a.firmasNombres && a.firmasNombres.contratista, a.firmas && a.firmas.contratista, w1, w2, 22);
+  filaFirma('Responsable interno', a.firmasNombres && a.firmasNombres.responsable_interno, a.firmas && a.firmas.responsable_interno, w1, w2, 22);
+  filaFirma('Responsable del área / Supervisor de seguridad', a.firmasNombres && a.firmasNombres.supervisor, a.firmas && a.firmas.supervisor, w1, w2, 22);
+  filaFirma('Responsable de EHS (Jefe de Seguridad)', a.firmaJefeSeguridadNombre, a.firmaJefeSeguridad, w1, w2, 22);
+  y += 2;
+
+  /* ===== ENTREGA DE LA TAREA ===== */
+  if(a.entrega){
+    tituloSeccion('Entrega de la tarea (al terminar el trabajo)');
+    preguntaSiNo('¿Se dejó en condiciones de operación segura?', a.entrega.seguro);
+    preguntaSiNo('¿El área que se entregó se encuentra con orden y limpieza?', a.entrega.orden);
+    preguntaSiNo('¿La basura, desperdicio y/o residuos se depositaron en su contenedor correspondiente?', a.entrega.residuosOk);
+    preguntaSiNo('¿El trabajo realizado cumple con lo solicitado?', a.entrega.cumple);
+    if(a.entrega.medidas){
+      doc.setFontSize(8);
+      doc.text(doc.splitTextToSize('Medidas de control: '+a.entrega.medidas, usableW), marginX, y+3); y += 8;
+    }
+    y += 2;
+
+    tituloSeccion('Nombre y firma de los involucrados en realizar la tarea');
+    (a.entrega.involucrados||[]).forEach((inv,i)=>{
+      filaFirma(`${i+1}.`, inv.nombre, inv.firma, 20, usableW-20, 20);
+    });
+    y += 2;
+
+    tituloSeccion('Inspección final');
     if(a.entrega.inspeccion){
-      firmaImg('Inspecciona — Responsable de la tarea', a.entrega.inspeccion.tarea.firma, a.entrega.inspeccion.tarea.nombre);
-      firmaImg('Inspecciona — Responsable del área', a.entrega.inspeccion.area.firma, a.entrega.inspeccion.area.nombre);
-      firmaImg('Inspecciona — EHS', a.entrega.inspeccion.ehs.firma, a.entrega.inspeccion.ehs.nombre);
+      filaFirma('Inspecciona — Responsable de la tarea', a.entrega.inspeccion.tarea.nombre, a.entrega.inspeccion.tarea.firma, w1, w2, 22);
+      filaFirma('Inspecciona — Responsable del área', a.entrega.inspeccion.area.nombre, a.entrega.inspeccion.area.firma, w1, w2, 22);
+      filaFirma('Inspecciona — EHS', a.entrega.inspeccion.ehs.nombre, a.entrega.inspeccion.ehs.firma, w1, w2, 22);
     }
   }
 
