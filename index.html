@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Sistema APR</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#172038">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="APR Seguridad">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192.png" type="image/png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -53,6 +61,16 @@
     box-shadow: 0 0 0 1px var(--line);
     border-radius: 18px;
     overflow:hidden;
+  }
+
+  /* Responsive: en tablet/escritorio se ve como una tarjeta centrada, no una app estirada */
+  @media (min-width: 720px){
+    body{ padding: 32px 16px; align-items:flex-start; }
+    #app{ max-width:480px; min-height: calc(100vh - 64px); box-shadow: 0 12px 40px rgba(23,32,56,.14), 0 0 0 1px var(--line); }
+  }
+  @media (max-width: 380px){
+    main{ padding-left:14px; padding-right:14px; }
+    header.topbar{ padding-left:16px; }
   }
 
   /* Ticket rail / perforated edge signature element */
@@ -523,7 +541,9 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 /* ===================== STATE ===================== */
 let state = {
   screen: 'login',
-  role: 'user', // 'user' | 'ehs' — vista de demostración, no cambia el rol real en la BD
+  role: 'user', // 'user' | 'ehs' — se determina por el rol real del perfil, ya no es un selector manual
+  isAdmin: false,
+  adminUsers: [],
   user: null,
   profile: null,
   aprs: [], // resumen (folio, empresa, area, status) cargado de Supabase
@@ -620,22 +640,38 @@ async function afterLogin(){
   nav('landing');
 }
 
+const ROLE_LABELS = {
+  responsable_interno: 'Responsable Interno',
+  supervisor_seguridad: 'Supervisor de Seguridad',
+  contratista: 'Contratista',
+  jefe_seguridad: 'Jefe de Seguridad (Admin)',
+};
+
 async function loadProfile(){
   let { data } = await sb.from('profiles').select('*').eq('id', state.user.id).single();
   if(!data){
     const ins = await sb.from('profiles')
-      .insert({ id: state.user.id, nombre: state.user.email, rol: 'solicitante' })
+      .insert({ id: state.user.id, nombre: state.user.email, rol: 'contratista' })
       .select().single();
     data = ins.data;
   }
   state.profile = data;
-  state.role = data && data.rol === 'jefe_ehs' ? 'ehs' : 'user';
+  // 'role' interno de la app: 'ehs' = puede revisar/aprobar APR, 'user' = solo captura y consulta
+  state.role = data && data.rol === 'jefe_seguridad' ? 'ehs' : 'user';
+  state.isAdmin = data && data.rol === 'jefe_seguridad';
 }
 
-async function setRole(r){
-  state.role = r;
-  render();
-  await loadNotificaciones();
+async function loadUsuariosAdmin(){
+  const { data, error } = await sb.from('profiles').select('*').order('nombre');
+  if(error){ console.error(error); return; }
+  state.adminUsers = data || [];
+}
+
+async function cambiarRolUsuario(userId, nuevoRol){
+  const { error } = await sb.from('profiles').update({ rol: nuevoRol }).eq('id', userId);
+  if(error){ showToast('No se pudo actualizar el rol'); console.error(error); return; }
+  showToast('Rol actualizado');
+  await loadUsuariosAdmin();
   render();
 }
 
@@ -767,6 +803,7 @@ function renderLogin(){
 }
 
 function renderLanding(){
+  const rolLabel = state.profile ? (ROLE_LABELS[state.profile.rol] || state.profile.rol) : '';
   return `
     <div class="hero">
       <div class="hero-badge">🛡️</div>
@@ -778,14 +815,17 @@ function renderLanding(){
       </div>
     </div>
     <div class="landing-body">
-      <div class="role-switch">
-        <button class="${state.role==='user'?'active':''}" onclick="setRole('user')">Vista solicitante</button>
-        <button class="${state.role==='ehs'?'active':''}" onclick="setRole('ehs')">Vista Jefe de EHS</button>
+      <div class="card" style="display:flex;align-items:center;justify-content:space-between;padding:12px 14px;">
+        <div>
+          <div style="font-size:11px;color:var(--muted);">Sesión activa</div>
+          <div style="font-weight:600;font-size:13.5px;">${state.user?state.user.email:''}</div>
+        </div>
+        <span class="badge pendiente">${rolLabel}</span>
       </div>
-      <p style="font-size:10.5px;color:var(--muted);margin:-6px 0 16px 2px;">Vista de demostración — no cambia tu rol real, solo lo que se te muestra aquí.</p>
-      <div class="eyebrow-label">Actividad reciente</div>
+      ${state.isAdmin ? `<button class="btn ghost" style="width:100%;margin:10px 0;" onclick="abrirAdmin()">⚙️ Administración de usuarios</button>` : ''}
+      <div class="eyebrow-label" style="margin-top:14px;">Actividad reciente</div>
       ${state.aprs.slice(0,3).map(a=>aprMiniCard(a)).join('') || '<div class="empty-state">Aún no hay APR creados.</div>'}
-      <button class="btn ghost" style="width:100%;margin-top:18px;" onclick="doLogout()">Cerrar sesión (${state.user?state.user.email:''})</button>
+      <button class="btn ghost" style="width:100%;margin-top:18px;" onclick="doLogout()">Cerrar sesión</button>
     </div>
   `;
 }
@@ -1192,6 +1232,29 @@ function renderNotificaciones(){
   `;
 }
 
+async function abrirAdmin(){
+  await loadUsuariosAdmin();
+  nav('admin');
+}
+
+function renderAdmin(){
+  const roles = Object.keys(ROLE_LABELS);
+  return `
+    ${header('Administración', 'USUARIOS Y PERMISOS', {back:"nav('landing')"})}
+    <main>
+      <p class="screen-sub">Asigna el rol de cada usuario. Para dar de alta a alguien nuevo, créalo primero en Supabase → Authentication → Users; aquí solo se le asigna el rol.</p>
+      ${state.adminUsers.length ? state.adminUsers.map(u=>`
+        <div class="card" style="padding:12px 14px;">
+          <div style="font-weight:600;font-size:13.5px;margin-bottom:8px;">${u.nombre || u.id}</div>
+          <select onchange="cambiarRolUsuario('${u.id}', this.value)">
+            ${roles.map(r=>`<option value="${r}" ${u.rol===r?'selected':''}>${ROLE_LABELS[r]}</option>`).join('')}
+          </select>
+        </div>
+      `).join('') : '<div class="empty-state">No hay usuarios registrados todavía.<br>Deben iniciar sesión al menos una vez para aparecer aquí.</div>'}
+    </main>
+  `;
+}
+
 function renderReglas(){
   const rules = [
     'Ningún APR puede autorizarse si falta información obligatoria.',
@@ -1226,6 +1289,7 @@ function render(){
     case 'revision': html += renderRevision(); break;
     case 'resultado': html += renderResultado(); break;
     case 'notificaciones': html += renderNotificaciones(); break;
+    case 'admin': html += renderAdmin(); break;
     case 'reglas': html += renderReglas(); break;
     default: html += renderLanding();
   }
@@ -1234,6 +1298,12 @@ function render(){
 
 render();
 initApp();
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('sw.js').catch(err=>console.error('SW error:', err));
+  });
+}
 </script>
 </body>
 </html>
