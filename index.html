@@ -1187,6 +1187,7 @@ function renderResumen(){
 async function guardarAprEnBD(draft){
   const { data: apr, error } = await sb.from('aprs').insert({
     folio: draft.folio,
+    creado_por: state.user.id,
     empresa: draft.datos.empresa,
     fecha: draft.datos.fecha || null,
     hora_inicio: draft.datos.horaInicio || null,
