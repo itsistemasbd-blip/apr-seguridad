@@ -1911,6 +1911,20 @@ function generarBarcodeDataUrl(texto){
 
 function generarPDF(){
   if(!state.isAdmin){ showToast('Solo el Jefe de Seguridad puede descargar el PDF'); return; }
+  if(typeof window.jspdf === 'undefined' || typeof window.JsBarcode === 'undefined'){
+    showToast('No se pudieron cargar las librerías del PDF. Revisa tu conexión e intenta de nuevo.');
+    console.error('jsPDF o JsBarcode no están disponibles en window.', { jspdf: window.jspdf, JsBarcode: window.JsBarcode });
+    return;
+  }
+  try{
+    generarPDFInterno();
+  }catch(err){
+    console.error('Error generando el PDF:', err);
+    showToast('Ocurrió un error al generar el PDF: ' + err.message);
+  }
+}
+
+function generarPDFInterno(){
   const a = state.draft;
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit:'mm', format:'a4' });
@@ -2100,7 +2114,16 @@ function renderAdmin(){
         <button class="btn primary" style="width:100%" onclick="crearUsuarioAdmin()">+ Crear usuario</button>
       </div>
 
-      <div class="eyebrow-label" style="margin-top:18px;">Usuarios y roles</div>
+      <button class="btn ghost" style="width:100%;margin-top:8px;" onclick="nav('admin-usuarios')">👥 Ver usuarios y roles (${state.adminUsers.length})</button>
+    </main>
+  `;
+}
+
+function renderAdminUsuarios(){
+  const roles = Object.keys(ROLE_LABELS);
+  return `
+    ${header('Usuarios y roles', 'ADMINISTRACIÓN', {back:"nav('admin')"})}
+    <main>
       ${state.adminUsers.length ? state.adminUsers.map(u=>`
         <div class="card" style="padding:12px 14px;">
           <div style="font-weight:600;font-size:13.5px;margin-bottom:8px;">${u.nombre || u.id}</div>
@@ -2177,6 +2200,7 @@ function render(){
     case 'resultado': html += renderResultado(); break;
     case 'notificaciones': html += renderNotificaciones(); break;
     case 'admin': html += renderAdmin(); break;
+    case 'admin-usuarios': html += renderAdminUsuarios(); break;
     case 'reglas': html += renderReglas(); break;
     default: html += renderLanding();
   }
