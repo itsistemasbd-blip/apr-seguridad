@@ -580,9 +580,9 @@ let state = {
 };
 
 async function nextFolio(){
-  const y = new Date().getFullYear();
-  const { count } = await sb.from('aprs').select('*', { count: 'exact', head: true });
-  return 'APR-'+y+'-'+String((count||0)+1).padStart(4,'0');
+  const { data, error } = await sb.rpc('siguiente_folio');
+  if(error){ console.error(error); return 'APR-'+new Date().getFullYear()+'-ERROR'; }
+  return data;
 }
 
 function startDraft(){
