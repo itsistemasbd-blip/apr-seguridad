@@ -531,6 +531,33 @@ const CHECKLIST_TEMPLATES = {
 };
 
 const TYPE_LABEL = Object.fromEntries(WORK_TYPES.map(t=>[t.key,t.label]));
+
+/* ===================== MÉTODO DE EVALUACIÓN DE RIESGOS (formato SKF) ===================== */
+// S = Severidad, F = Frecuencia, P = Probabilidad de ocurrencia, PR = Posibilidad de reducir ocurrencia
+const RISK_MATRIX = {
+  'S1_F1_P1_PR1':1, 'S1_F1_P1_PR2':1, 'S1_F1_P2_PR1':1, 'S1_F1_P2_PR2':2, 'S1_F1_P3_PR1':2, 'S1_F1_P3_PR2':2,
+  'S1_F2_P1_PR1':1, 'S1_F2_P1_PR2':2, 'S1_F2_P2_PR1':2, 'S1_F2_P2_PR2':2, 'S1_F2_P3_PR1':2, 'S1_F2_P3_PR2':4,
+  'S2_F1_P1_PR1':2, 'S2_F1_P1_PR2':2, 'S2_F1_P2_PR1':2, 'S2_F1_P2_PR2':4, 'S2_F1_P3_PR1':4, 'S2_F1_P3_PR2':4,
+  'S2_F2_P1_PR1':3, 'S2_F2_P1_PR2':4, 'S2_F2_P2_PR1':4, 'S2_F2_P2_PR2':5, 'S2_F2_P3_PR1':5, 'S2_F2_P3_PR2':6,
+};
+const S_OPTS = [{v:'S1',t:'S1 · Lesión leve'},{v:'S2',t:'S2 · Lesión seria'}];
+const F_OPTS = [{v:'F1',t:'F1 · ≤2 veces/turno o <15 min'},{v:'F2',t:'F2 · >2 veces/turno o >15 min'}];
+const P_OPTS = [{v:'P1',t:'P1 · Controles robustos'},{v:'P2',t:'P2 · Falló hace +3 meses'},{v:'P3',t:'P3 · Falló hace -3 meses'}];
+const PR_OPTS = [{v:'PR1',t:'PR1 · Posible bajo ciertas condiciones'},{v:'PR2',t:'PR2 · Imposible'}];
+
+function calcRiesgo(s,f,p,pr){
+  if(!s||!f||!p||!pr) return null;
+  return RISK_MATRIX[`${s}_${f}_${p}_${pr}`] ?? null;
+}
+function riskBand(n){
+  if(n===null || n===undefined) return {label:'Sin calcular', cls:'borrador'};
+  if(n<=2) return {label:'Riesgo bajo ('+n+')', cls:'autorizado'};
+  if(n<=4) return {label:'Riesgo medio ('+n+')', cls:'pendiente'};
+  return {label:'Riesgo alto ('+n+')', cls:'rechazado'};
+}
+function nuevoPaso(){
+  return { id:'p_'+Math.random().toString(36).slice(2,9), descripcion:'', peligro:'', s:null, f:null, p:null, pr:null, controles:'' };
+}
 const EQUIPO_LABEL = Object.fromEntries(EQUIPO_ALTURAS.map(t=>[t.key,t.label]));
 
 /* ===================== SUPABASE ===================== */
@@ -563,6 +590,8 @@ function startDraft(){
     id: 'draft_'+Math.random().toString(36).slice(2,9),
     folio: 'BORRADOR',
     datos: {empresa:'', fecha:'', horaInicio:'', trabajadores:'', area:'', descripcion:'', duracionInicio:'', duracionFin:'', responsableInterno:'', supervisorSeguridad:''},
+    clima: { aplica: null, medidas: '' },
+    pasos: [nuevoPaso()],
     tipos: [],
     equipo: null,
     checklists: [],
@@ -570,6 +599,21 @@ function startDraft(){
     status: 'borrador',
     comments: [],
   };
+}
+
+function setPasoField(id, field, value){
+  const paso = state.draft.pasos.find(p=>p.id===id);
+  paso[field] = value;
+  render();
+}
+function agregarPaso(){ state.draft.pasos.push(nuevoPaso()); render(); }
+function quitarPaso(id){
+  if(state.draft.pasos.length<=1){ showToast('Debe haber al menos un paso'); return; }
+  state.draft.pasos = state.draft.pasos.filter(p=>p.id!==id);
+  render();
+}
+function pasosCompletos(){
+  return state.draft.pasos.every(p=> p.descripcion && p.peligro && p.s && p.f && p.p && p.pr && p.controles);
 }
 
 function buildChecklists(){
@@ -694,7 +738,7 @@ function inferTag(texto){
 }
 
 async function loadNotificaciones(){
-  const rolDb = state.role==='ehs' ? 'jefe_ehs' : 'solicitante';
+  const rolDb = state.role==='ehs' ? 'jefe_seguridad' : 'solicitante';
   const { data, error } = await sb.from('notificaciones')
     .select('*').eq('para_rol', rolDb)
     .order('created_at', { ascending:false }).limit(30);
@@ -709,6 +753,7 @@ async function loadAprDetail(id){
   const { data: apr } = await sb.from('aprs').select('*').eq('id', id).single();
   const { data: checklists } = await sb.from('checklists').select('*, checklist_items(*)').eq('apr_id', id);
   const { data: comentariosRows } = await sb.from('comentarios').select('*').eq('apr_id', id).order('created_at');
+  const { data: pasosRows } = await sb.from('pasos_riesgo').select('*').eq('apr_id', id).order('orden');
   state.draft = {
     id: apr.id,
     folio: apr.folio,
@@ -717,6 +762,12 @@ async function loadAprDetail(id){
       horaInicio: apr.hora_inicio, trabajadores: apr.trabajadores,
       responsableInterno: apr.responsable_interno, supervisorSeguridad: apr.supervisor_seguridad,
     },
+    clima: { aplica: apr.clima_aplica, medidas: apr.clima_medidas || '' },
+    pasos: (pasosRows||[]).map(p=>({
+      id: p.id, descripcion: p.descripcion, peligro: p.peligro,
+      s: p.severidad, f: p.frecuencia, p: p.probabilidad, pr: p.posibilidad_reduccion,
+      controles: p.controles,
+    })),
     tipos: apr.tipos_trabajo || [],
     equipo: apr.equipo,
     checklists: (checklists||[]).map(cl=>({
@@ -737,7 +788,7 @@ function showToast(msg){
 }
 
 /* ===================== STEP RAIL ===================== */
-const STEP_LABELS = ['Datos','Tipo','Checklist','Resumen','Envío','Revisión','Resultado'];
+const STEP_LABELS = ['Datos','Riesgo','Tipo','Checklist','Resumen','Envío','Revisión','Resultado'];
 function stepRail(current){
   let html = '<div class="steprail">';
   STEP_LABELS.forEach((lbl,i)=>{
@@ -897,15 +948,89 @@ function saveDatosAndNext(){
   d.duracionInicio = val('f_dini'); d.duracionFin = val('f_dfin');
   d.responsableInterno = val('f_resp'); d.supervisorSeguridad = val('f_sup');
   if(!d.empresa || !d.area){ showToast('Completa al menos empresa y área'); return; }
-  nav('nuevo-tipo');
+  nav('nuevo-riesgo');
 }
 function val(id){ const el = document.getElementById(id); return el ? el.value : ''; }
 
-function renderNuevoTipo(){
+function renderNuevoRiesgo(){
+  const c = state.draft.clima;
   return `
-    ${header('Tipo de trabajo', 'PASO 2 · '+state.draft.folio, {back:"nav('nuevo-datos')"})}
+    ${header('Análisis de riesgo', 'PASO 2 · '+state.draft.folio, {back:"nav('nuevo-datos')"})}
     <main>
       ${stepRail(2)}
+      <h2 class="screen-title">Condiciones y evaluación de riesgo</h2>
+      <p class="screen-sub">Por cada paso de la tarea, indica el peligro y evalúa el riesgo — el sistema calcula el nivel automáticamente.</p>
+
+      <div class="card">
+        <div class="field"><label>¿Alguna situación meteorológica (lluvia, viento, tormentas eléctricas) lo pone en peligro?</label></div>
+        <div class="ci-opts" style="margin-bottom:10px;">
+          <div class="pill ${c.aplica===true?'on cumple':''}" onclick="state.draft.clima.aplica=true; render()">Sí</div>
+          <div class="pill ${c.aplica===false?'on na':''}" onclick="state.draft.clima.aplica=false; state.draft.clima.medidas=''; render()">No</div>
+        </div>
+        ${c.aplica ? `<div class="field"><label>¿Qué medidas se van a tomar?</label><textarea id="f_clima_medidas" oninput="state.draft.clima.medidas=this.value">${c.medidas}</textarea></div>` : ''}
+      </div>
+
+      ${state.draft.pasos.map((p,i)=>renderPasoRiesgo(p,i)).join('')}
+
+      <button class="btn ghost" style="width:100%;margin-bottom:14px;" onclick="agregarPaso()">+ Agregar paso de la tarea</button>
+    </main>
+    <div class="btnbar">
+      <button class="btn ghost" onclick="nav('nuevo-datos')">Anterior</button>
+      <button class="btn primary" ${!pasosCompletos() || (c.aplica && !c.medidas) ? 'disabled':''} onclick="nav('nuevo-tipo')">Siguiente</button>
+    </div>
+  `;
+}
+
+function renderPasoRiesgo(p, i){
+  const riesgo = calcRiesgo(p.s,p.f,p.p,p.pr);
+  const band = riskBand(riesgo);
+  return `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div class="eyebrow-label" style="margin:0;">Paso ${i+1}</div>
+        ${state.draft.pasos.length>1 ? `<span style="cursor:pointer;color:var(--red);font-size:12px;font-weight:600;" onclick="quitarPaso('${p.id}')">Quitar</span>` : ''}
+      </div>
+      <div class="field"><label>Secuencia de actividad</label><textarea oninput="setPasoField('${p.id}','descripcion',this.value)" placeholder="Ej. Retirar guarda de protección de la banda">${p.descripcion}</textarea></div>
+      <div class="field"><label>Peligro potencial</label><textarea oninput="setPasoField('${p.id}','peligro',this.value)" placeholder="Ej. Atrapamiento por partes en movimiento">${p.peligro}</textarea></div>
+      <div class="row2">
+        <div class="field"><label>Severidad (S)</label>
+          <select onchange="setPasoField('${p.id}','s',this.value)">
+            <option value="">Elige...</option>
+            ${S_OPTS.map(o=>`<option value="${o.v}" ${p.s===o.v?'selected':''}>${o.t}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Frecuencia (F)</label>
+          <select onchange="setPasoField('${p.id}','f',this.value)">
+            <option value="">Elige...</option>
+            ${F_OPTS.map(o=>`<option value="${o.v}" ${p.f===o.v?'selected':''}>${o.t}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="row2">
+        <div class="field"><label>Probabilidad (P)</label>
+          <select onchange="setPasoField('${p.id}','p',this.value)">
+            <option value="">Elige...</option>
+            ${P_OPTS.map(o=>`<option value="${o.v}" ${p.p===o.v?'selected':''}>${o.t}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Posib. de reducir (PR)</label>
+          <select onchange="setPasoField('${p.id}','pr',this.value)">
+            <option value="">Elige...</option>
+            ${PR_OPTS.map(o=>`<option value="${o.v}" ${p.pr===o.v?'selected':''}>${o.t}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div style="margin:6px 0 12px 0;"><span class="badge ${band.cls}">${band.label}</span></div>
+      <div class="field"><label>Medidas de control para reducir o eliminar el riesgo</label><textarea oninput="setPasoField('${p.id}','controles',this.value)" placeholder="Ej. Bloqueo y etiquetado antes de retirar la guarda">${p.controles}</textarea></div>
+    </div>
+  `;
+}
+
+function renderNuevoTipo(){
+  return `
+    ${header('Tipo de trabajo', 'PASO 3 · '+state.draft.folio, {back:"nav('nuevo-riesgo')"})}
+    <main>
+      ${stepRail(3)}
       <h2 class="screen-title">Selecciona el tipo de trabajo de alto riesgo</h2>
       <p class="screen-sub">Puedes elegir más de uno. Cada tipo genera su propio checklist.</p>
       <div class="worktype-list">
@@ -934,9 +1059,9 @@ function afterTipoNext(){
 
 function renderNuevoEquipo(){
   return `
-    ${header('Equipo a utilizar', 'PASO 2.1 · Trabajo en alturas', {back:"nav('nuevo-tipo')"})}
+    ${header('Equipo a utilizar', 'PASO 3.1 · Trabajo en alturas', {back:"nav('nuevo-tipo')"})}
     <main>
-      ${stepRail(2)}
+      ${stepRail(3)}
       <h2 class="screen-title">¿Con qué equipo se realizará el trabajo en alturas?</h2>
       <p class="screen-sub">Dependiendo de la opción, se abrirá el checklist específico de ese equipo.</p>
       <div class="worktype-list">
@@ -960,9 +1085,9 @@ function renderNuevoChecklist(){
   const cl = state.draft.checklists[idx];
   const isLast = idx === state.draft.checklists.length-1;
   return `
-    ${header('Checklist', `PASO 3 · ${idx+1} de ${state.draft.checklists.length}`, {back:"prevChecklist()"})}
+    ${header('Checklist', `PASO 4 · ${idx+1} de ${state.draft.checklists.length}`, {back:"prevChecklist()"})}
     <main>
-      ${stepRail(3)}
+      ${stepRail(4)}
       <h2 class="screen-title">${cl.title}</h2>
       <p class="screen-sub">Marca cada punto como Cumple o N/A. Los puntos críticos (marcados en rojo) requieren evidencia fotográfica obligatoria.</p>
       ${cl.items.map(it=>`
@@ -1030,10 +1155,13 @@ function renderResumen(){
   const done = completedChecklistsCount();
   const critMissing = state.draft.checklists.reduce((s,cl)=>s+totalCriticalMissingPhoto(cl),0);
   const ready = allChecklistsDone() && allCriticalPhotosOk();
+  const nivelesRiesgo = state.draft.pasos.map(p=>calcRiesgo(p.s,p.f,p.p,p.pr)).filter(n=>n!==null);
+  const riesgoMax = nivelesRiesgo.length ? Math.max(...nivelesRiesgo) : null;
+  const bandMax = riskBand(riesgoMax);
   return `
-    ${header('Resumen del APR', 'PASO 4 · '+state.draft.folio, {back:"nav('nuevo-checklist')"})}
+    ${header('Resumen del APR', 'PASO 5 · '+state.draft.folio, {back:"nav('nuevo-checklist')"})}
     <main>
-      ${stepRail(4)}
+      ${stepRail(5)}
       <h2 class="screen-title">Resumen del APR</h2>
       <p class="screen-sub">Verifica la información antes de enviarla al jefe de EHS.</p>
       <div class="card">
@@ -1042,6 +1170,8 @@ function renderResumen(){
         <div class="summary-row"><div class="k">Área</div><div class="v">${d.area}</div></div>
         <div class="summary-row"><div class="k">Descripción</div><div class="v">${d.descripcion||'—'}</div></div>
         <div class="summary-row"><div class="k">Tipo de trabajo</div><div class="v">${state.draft.tipos.map(t=>TYPE_LABEL[t]).join(', ')}</div></div>
+        <div class="summary-row"><div class="k">Pasos analizados</div><div class="v">${state.draft.pasos.length}</div></div>
+        <div class="summary-row"><div class="k">Nivel de riesgo más alto</div><div class="v"><span class="badge ${bandMax.cls}">${bandMax.label}</span></div></div>
         <div class="summary-row"><div class="k">Checklists completados</div><div class="v">${done} de ${total} ${done===total?'✅':''}</div></div>
         <div class="summary-row"><div class="k">Evidencia fotográfica crítica</div><div class="v">${critMissing===0?'Completa ✅':critMissing+' pendiente(s) ⚠️'}</div></div>
         <div class="summary-row"><div class="k">Estatus actual</div><div class="v">${ready?'Listo para revisión EHS':'Incompleto'}</div></div>
@@ -1067,9 +1197,22 @@ async function guardarAprEnBD(draft){
     supervisor_seguridad: draft.datos.supervisorSeguridad,
     tipos_trabajo: draft.tipos,
     equipo: draft.equipo,
+    clima_aplica: draft.clima.aplica,
+    clima_medidas: draft.clima.medidas || null,
     status: 'pendiente',
   }).select().single();
   if(error){ console.error(error); return null; }
+
+  for(let i=0;i<draft.pasos.length;i++){
+    const p = draft.pasos[i];
+    await sb.from('pasos_riesgo').insert({
+      apr_id: apr.id, orden: i,
+      descripcion: p.descripcion, peligro: p.peligro,
+      severidad: p.s, frecuencia: p.f, probabilidad: p.p, posibilidad_reduccion: p.pr,
+      riesgo_valor: calcRiesgo(p.s,p.f,p.p,p.pr),
+      controles: p.controles,
+    });
+  }
 
   for(const cl of draft.checklists){
     const { data: checklist } = await sb.from('checklists')
@@ -1087,7 +1230,7 @@ async function guardarAprEnBD(draft){
   }
 
   await sb.from('notificaciones').insert({
-    apr_id: apr.id, para_rol: 'jefe_ehs',
+    apr_id: apr.id, para_rol: 'jefe_seguridad',
     texto: `Nuevo APR ${apr.folio} pendiente de aprobación (EHS)`,
   });
 
@@ -1111,7 +1254,7 @@ function renderEnviado(){
   return `
     ${header('Enviado', '', {})}
     <main style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding-top:60px;">
-      ${stepRail(5)}
+      ${stepRail(6)}
       <div style="font-size:52px;margin-bottom:14px;">📧</div>
       <h2 class="screen-title">El APR se envía automáticamente</h2>
       <p class="screen-sub">${state.draft.folio} fue enviado al jefe de EHS para su revisión y aprobación. Recibirás una notificación con el resultado.</p>
@@ -1122,13 +1265,33 @@ function renderEnviado(){
   `;
 }
 
+function riesgoResumenCard(a){
+  if(!a.pasos || !a.pasos.length) return '';
+  return `
+    <div class="eyebrow-label" style="margin-top:16px;">Análisis de riesgo por paso</div>
+    ${a.pasos.map((p,i)=>{
+      const band = riskBand(calcRiesgo(p.s,p.f,p.p,p.pr));
+      return `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+          <div style="font-size:13px;font-weight:600;">Paso ${i+1}: ${p.descripcion||'—'}</div>
+          <span class="badge ${band.cls}" style="flex-shrink:0;">${band.label}</span>
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-top:6px;">Peligro: ${p.peligro||'—'}</div>
+        <div style="font-size:12px;color:var(--ink);margin-top:6px;">Control: ${p.controles||'—'}</div>
+      </div>`;
+    }).join('')}
+    ${a.clima && a.clima.aplica ? `<div class="card"><div class="eyebrow-label" style="margin:0 0 6px 0;">Condición meteorológica de riesgo</div><div style="font-size:13px;">${a.clima.medidas}</div></div>` : ''}
+  `;
+}
+
 function renderRevision(){
   const a = state.draft;
   const d = a.datos;
   return `
     ${header('Revisión APR: '+a.folio, 'VISTA JEFE DE EHS', {back:"nav('landing')"})}
     <main>
-      ${stepRail(6)}
+      ${stepRail(7)}
       <div class="card">
         <div class="summary-row"><div class="k">Empresa contratista</div><div class="v">${d.empresa}</div></div>
         <div class="summary-row"><div class="k">Área</div><div class="v">${d.area}</div></div>
@@ -1138,7 +1301,8 @@ function renderRevision(){
         <div class="summary-row"><div class="k">Evidencia fotográfica</div><div class="v">Completada ✅</div></div>
         <div class="summary-row"><div class="k">Estatus actual</div><div class="v">${statusBadge(a.status)}</div></div>
       </div>
-      <div class="eyebrow-label">Comentarios (obligatorio si rechaza o solicita correcciones)</div>
+      ${riesgoResumenCard(a)}
+      <div class="eyebrow-label" style="margin-top:18px;">Comentarios (obligatorio si rechaza o solicita correcciones)</div>
       <div class="card" style="padding:10px;">
         <textarea id="ehs_comment" placeholder="Escribe tu comentario..."></textarea>
       </div>
@@ -1187,12 +1351,13 @@ function renderResultado(){
   return `
     ${header('Resultado final', a.folio, {back:"nav('landing')"})}
     <main style="text-align:center;padding-top:20px;">
-      ${stepRail(7)}
+      ${stepRail(8)}
       <div style="font-size:56px;margin:10px 0;">${info.emoji}</div>
       <h2 class="screen-title" style="text-align:center;">${info.title}</h2>
       <p class="screen-sub">${info.txt}</p>
       <div style="margin:14px 0;">${statusBadge(a.status)}</div>
       ${a.comments.length ? `<div class="card" style="text-align:left;"><div class="eyebrow-label">Comentarios del jefe de EHS</div>${a.comments.map(c=>`<div style="font-size:13px;margin-bottom:6px;">"${c}"</div>`).join('')}</div>` : ''}
+      <div style="text-align:left;">${riesgoResumenCard(a)}</div>
       <div class="card" style="text-align:left;">
         <div class="eyebrow-label">Firmas requeridas</div>
         <div style="font-size:13px;line-height:1.9;">
@@ -1281,6 +1446,7 @@ function render(){
     case 'landing': html += renderLanding(); break;
     case 'mis-aprs': html += renderMisAprs(); break;
     case 'nuevo-datos': html += renderNuevoDatos(); break;
+    case 'nuevo-riesgo': html += renderNuevoRiesgo(); break;
     case 'nuevo-tipo': html += renderNuevoTipo(); break;
     case 'nuevo-equipo': html += renderNuevoEquipo(); break;
     case 'nuevo-checklist': html += renderNuevoChecklist(); break;
