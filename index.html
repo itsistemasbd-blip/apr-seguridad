@@ -73,20 +73,12 @@
     header.topbar{ padding-left:16px; }
   }
 
-  /* Ticket rail / perforated edge signature element */
-  .ticket-rail{
-    position:absolute;
-    left:0; top:0; bottom:0;
-    width:6px;
-    background: repeating-linear-gradient(180deg, var(--navy) 0 6px, transparent 6px 14px);
-    opacity:.35;
-    z-index:5;
-  }
+  /* (Se retiró el borde perforado tipo libreta para un look más minimalista) */
 
   header.topbar{
     background: var(--navy);
     color:#fff;
-    padding:16px 18px 14px 22px;
+    padding:16px 18px 14px 18px;
     display:flex;
     align-items:center;
     gap:10px;
@@ -132,7 +124,7 @@
 
   main{
     flex:1;
-    padding: 18px 18px 100px 22px;
+    padding: 18px 18px 100px 18px;
     overflow-y:auto;
   }
 
@@ -285,7 +277,7 @@
   .btnbar{
     position:absolute; left:6px; right:0; bottom:0;
     background: linear-gradient(180deg, rgba(243,241,234,0) 0%, var(--paper) 30%);
-    padding: 26px 18px 18px 22px;
+    padding: 26px 18px 18px 18px;
     display:flex; gap:10px;
   }
   .btn{
@@ -334,8 +326,8 @@
   .hero{
     background: var(--navy);
     color:#fff;
-    margin: -18px -18px -18px -22px;
-    padding: 30px 22px 34px 26px;
+    margin: -18px -18px 0 -18px;
+    padding: 34px 22px 32px 22px;
     position:relative;
     overflow:hidden;
   }
@@ -346,14 +338,14 @@
     border: 1px solid rgba(255,255,255,.08);
   }
   .hero-badge{
-    width:52px; height:52px; border-radius:13px;
+    width:48px; height:48px; border-radius:12px;
     background: rgba(255,255,255,.08);
     display:flex; align-items:center; justify-content:center;
-    font-size:24px; margin-bottom:16px;
+    font-size:22px; margin-bottom:18px;
   }
-  .hero h1{ font-family:var(--disp); font-size:25px; margin:0 0 6px 0; }
-  .hero p{ color:rgba(255,255,255,.6); font-size:13.5px; margin:0; line-height:1.5; }
-  .hero-cta{ margin-top:22px; display:flex; flex-direction:column; gap:9px; }
+  .hero h1{ font-family:var(--disp); font-size:24px; line-height:1.25; letter-spacing:-0.01em; margin:0 0 10px 0; }
+  .hero p{ color:rgba(255,255,255,.62); font-size:13px; margin:0; line-height:1.55; max-width:36ch; }
+  .hero-cta{ margin-top:24px; display:flex; flex-direction:column; gap:9px; }
   .hero-cta .btn.primary{ background:#fff; color:var(--navy); }
   .hero-cta .btn.line{ background:transparent; color:#fff; border:1.5px solid rgba(255,255,255,.3); }
 
@@ -960,7 +952,7 @@ function renderLogin(){
         <div class="field"><label>Contraseña</label><input type="password" id="login_password" placeholder="••••••••"></div>
       </div>
       <button class="btn primary" style="width:100%" onclick="doLogin()">Iniciar sesión</button>
-      <p style="font-size:11.5px;color:var(--muted);text-align:center;margin-top:14px;">Tu usuario debe existir en Supabase (Authentication → Users).</p>
+      <p style="font-size:11.5px;color:var(--muted);text-align:center;margin-top:14px;">Si no tienes cuenta, contacta a tu administrador.</p>
     </main>
   `;
 }
@@ -2322,7 +2314,7 @@ function render(){
   const selStart = activeId && typeof activeEl.selectionStart === 'number' ? activeEl.selectionStart : null;
   const selEnd = activeId && typeof activeEl.selectionEnd === 'number' ? activeEl.selectionEnd : null;
 
-  let html = '<div class="ticket-rail"></div>';
+  let html = '';
   switch(state.screen){
     case 'login': html += renderLogin(); break;
     case 'landing': html += renderLanding(); break;
