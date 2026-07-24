@@ -1407,7 +1407,20 @@ function renderAdmin(){
   return `
     ${header('Administración', 'USUARIOS Y PERMISOS', {back:"nav('landing')"})}
     <main>
-      <p class="screen-sub">Asigna el rol de cada usuario. Para dar de alta a alguien nuevo, créalo primero en Supabase → Authentication → Users; aquí solo se le asigna el rol.</p>
+      <div class="card">
+        <div class="eyebrow-label" style="margin:0 0 10px;">Crear nuevo usuario</div>
+        <div class="field"><label>Nombre</label><input type="text" id="new_user_nombre" placeholder="Nombre completo"></div>
+        <div class="field"><label>Correo</label><input type="email" id="new_user_email" placeholder="correo@empresa.com"></div>
+        <div class="field"><label>Contraseña temporal</label><input type="text" id="new_user_password" placeholder="Mínimo 6 caracteres"></div>
+        <div class="field"><label>Rol</label>
+          <select id="new_user_rol">
+            ${roles.map(r=>`<option value="${r}">${ROLE_LABELS[r]}</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn primary" style="width:100%" onclick="crearUsuarioAdmin()">+ Crear usuario</button>
+      </div>
+
+      <div class="eyebrow-label" style="margin-top:18px;">Usuarios y roles</div>
       ${state.adminUsers.length ? state.adminUsers.map(u=>`
         <div class="card" style="padding:12px 14px;">
           <div style="font-weight:600;font-size:13.5px;margin-bottom:8px;">${u.nombre || u.id}</div>
@@ -1415,9 +1428,28 @@ function renderAdmin(){
             ${roles.map(r=>`<option value="${r}" ${u.rol===r?'selected':''}>${ROLE_LABELS[r]}</option>`).join('')}
           </select>
         </div>
-      `).join('') : '<div class="empty-state">No hay usuarios registrados todavía.<br>Deben iniciar sesión al menos una vez para aparecer aquí.</div>'}
+      `).join('') : '<div class="empty-state">No hay usuarios registrados todavía.</div>'}
     </main>
   `;
+}
+
+async function crearUsuarioAdmin(){
+  const nombre = val('new_user_nombre');
+  const email = val('new_user_email');
+  const password = val('new_user_password');
+  const rol = val('new_user_rol');
+  if(!email || !password || !rol){ showToast('Completa correo, contraseña y rol'); return; }
+  if(password.length < 6){ showToast('La contraseña debe tener al menos 6 caracteres'); return; }
+  showToast('Creando usuario...');
+  const { data, error } = await sb.functions.invoke('create-user', { body: { email, password, nombre, rol } });
+  if(error || (data && data.error)){
+    showToast('No se pudo crear: ' + ((data && data.error) || error.message));
+    console.error(error || (data && data.error));
+    return;
+  }
+  showToast('Usuario creado correctamente');
+  await loadUsuariosAdmin();
+  render();
 }
 
 function renderReglas(){
