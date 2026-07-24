@@ -15,8 +15,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/JsBarcode/3.11.5/JsBarcode.all.min.js"></script>
 <style>
   :root{
     --navy: #172038;
@@ -829,7 +827,7 @@ function showToast(msg){
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.classList.add('show');
-  setTimeout(()=>t.classList.remove('show'), 2200);
+  setTimeout(()=>t.classList.remove('show'), 4000);
 }
 
 /* ===================== FIRMA DIBUJADA (lienzo táctil) ===================== */
@@ -1909,11 +1907,35 @@ function generarBarcodeDataUrl(texto){
   return canvas.toDataURL('image/png');
 }
 
-function generarPDF(){
+function cargarScript(url){
+  return new Promise((resolve, reject)=>{
+    const existing = document.querySelector(`script[src="${url}"]`);
+    if(existing){ resolve(); return; }
+    const s = document.createElement('script');
+    s.src = url;
+    s.onload = ()=>resolve();
+    s.onerror = ()=>reject(new Error('No se pudo cargar: '+url));
+    document.head.appendChild(s);
+  });
+}
+
+async function asegurarLibreriasPDF(){
+  if(typeof window.jspdf === 'undefined'){
+    await cargarScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+  }
+  if(typeof window.JsBarcode === 'undefined'){
+    await cargarScript('https://cdnjs.cloudflare.com/ajax/libs/JsBarcode/3.11.5/JsBarcode.all.min.js');
+  }
+}
+
+async function generarPDF(){
   if(!state.isAdmin){ showToast('Solo el Jefe de Seguridad puede descargar el PDF'); return; }
-  if(typeof window.jspdf === 'undefined' || typeof window.JsBarcode === 'undefined'){
-    showToast('No se pudieron cargar las librerías del PDF. Revisa tu conexión e intenta de nuevo.');
-    console.error('jsPDF o JsBarcode no están disponibles en window.', { jspdf: window.jspdf, JsBarcode: window.JsBarcode });
+  showToast('Preparando PDF...');
+  try{
+    await asegurarLibreriasPDF();
+  }catch(err){
+    console.error('Error cargando librerías del PDF:', err);
+    showToast(err.message);
     return;
   }
   try{
