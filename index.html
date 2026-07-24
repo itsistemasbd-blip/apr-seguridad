@@ -1909,22 +1909,20 @@ function generarBarcodeDataUrl(texto){
 
 function cargarScript(url){
   return new Promise((resolve, reject)=>{
-    const existing = document.querySelector(`script[src="${url}"]`);
-    if(existing){ resolve(); return; }
     const s = document.createElement('script');
     s.src = url;
     s.onload = ()=>resolve();
-    s.onerror = ()=>reject(new Error('No se pudo cargar: '+url));
+    s.onerror = ()=>{ s.remove(); reject(new Error('No se pudo cargar: '+url)); };
     document.head.appendChild(s);
   });
 }
 
 async function asegurarLibreriasPDF(){
   if(typeof window.jspdf === 'undefined'){
-    await cargarScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    await cargarScript('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js');
   }
   if(typeof window.JsBarcode === 'undefined'){
-    await cargarScript('https://cdnjs.cloudflare.com/ajax/libs/JsBarcode/3.11.5/JsBarcode.all.min.js');
+    await cargarScript('https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js');
   }
 }
 
