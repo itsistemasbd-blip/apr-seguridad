@@ -400,6 +400,22 @@
   .toast.show{ opacity:1; transform:translateX(-50%) translateY(-6px); }
 
   textarea{ resize:none; min-height:64px; }
+
+  .firma-block{ margin-bottom:16px; }
+  .firma-wrap{
+    border:1.5px dashed #C7C2B2;
+    border-radius:11px;
+    background:#fbfaf7;
+    overflow:hidden;
+    touch-action:none;
+  }
+  .firma-canvas{ width:100%; height:130px; display:block; touch-action:none; }
+  .epp-item{
+    display:flex; align-items:center; gap:10px;
+    padding:10px 12px; border:1.5px solid var(--line); border-radius:10px;
+    background:#fbfaf7; margin-bottom:7px; cursor:pointer;
+  }
+  .epp-item.sel{ border-color:var(--navy); background:#fff; box-shadow: inset 0 0 0 1px var(--navy); }
 </style>
 </head>
 <body>
@@ -427,6 +443,12 @@ const EQUIPO_ALTURAS = [
   {key:'extension', label:'Escalera de extensión'},
   {key:'andamios', label:'Andamios'},
   {key:'otro_equipo', label:'Otro'},
+];
+
+const EPP_OPTIONS = [
+  'Guante anticorte', 'Chaleco reflejante', 'Zapato antiestático', 'Casco de seguridad',
+  'Gafas de seguridad', 'Protección auditiva', 'Arnés de seguridad', 'Guantes dieléctricos',
+  'Respirador / mascarilla', 'Otro',
 ];
 
 function critItems(names, criticalIdx){
@@ -596,9 +618,20 @@ function startDraft(){
     equipo: null,
     checklists: [],
     checklistStep: 0,
+    epp: EPP_OPTIONS.map(nombre=>({nombre, selected:false, modelo:''})),
+    eppFoto: null,
+    residuos: [nuevoResiduo()],
+    impactoFoto: null,
+    energia: { aplica:null, cual:'', bloqueoOk:null, remanente:'' },
+    firmasNombres: { contratista:'', responsable_interno:'', supervisor:'' },
+    firmas: { contratista:null, responsable_interno:null, supervisor:null },
+    entrega: null,
     status: 'borrador',
     comments: [],
   };
+}
+function nuevoResiduo(){
+  return { id:'r_'+Math.random().toString(36).slice(2,9), descripcion:'', control:'' };
 }
 
 function setPasoField(id, field, value){
@@ -775,6 +808,16 @@ async function loadAprDetail(id){
       items: (cl.checklist_items||[]).map(it=>({ id:it.id, name:it.nombre, critical:it.critico, status:it.status, photo:it.foto_url }))
     })),
     checklistStep: 0,
+    epp: apr.epp || [],
+    eppFoto: apr.epp_foto,
+    residuos: apr.residuos || [],
+    impactoFoto: apr.impacto_foto,
+    energia: { aplica: apr.energia_aplica, cual: apr.energia_cual || '', bloqueoOk: apr.energia_bloqueo_ok, remanente: apr.energia_remanente || '' },
+    firmasNombres: { contratista: apr.firma_contratista_nombre||'', responsable_interno: apr.firma_responsable_interno_nombre||'', supervisor: apr.firma_supervisor_nombre||'' },
+    firmas: { contratista: apr.firma_contratista, responsable_interno: apr.firma_responsable_interno, supervisor: apr.firma_supervisor },
+    firmaJefeSeguridad: apr.firma_jefe_seguridad,
+    firmaJefeSeguridadNombre: apr.firma_jefe_seguridad_nombre,
+    entrega: apr.entrega || null,
     status: apr.status,
     comments: (comentariosRows||[]).map(c=>c.texto),
   };
@@ -787,8 +830,77 @@ function showToast(msg){
   setTimeout(()=>t.classList.remove('show'), 2200);
 }
 
+/* ===================== FIRMA DIBUJADA (lienzo táctil) ===================== */
+// El destino de cada firma se resuelve con un "getter"/"setter" pasados desde cada pantalla,
+// para poder usarse tanto en el borrador (firmas de creación) como en objetos temporales (entrega, aprobación).
+let FIRMA_TARGETS = {};
+
+function registrarFirmaTarget(fieldId, getValue, setValue){
+  FIRMA_TARGETS[fieldId] = { getValue, setValue };
+}
+
+function initFirmasPads(){
+  document.querySelectorAll('.firma-canvas').forEach(canvas=>{
+    const fieldId = canvas.dataset.field;
+    const target = FIRMA_TARGETS[fieldId];
+    if(!target) return;
+    const ctx = canvas.getContext('2d');
+    // Ajustar resolución interna al tamaño real mostrado (para que no se vea pixeleado)
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * 2;
+    canvas.height = rect.height * 2;
+    ctx.strokeStyle = '#172038';
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    const saved = target.getValue();
+    if(saved){
+      const img = new Image();
+      img.onload = ()=> ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      img.src = saved;
+    }
+
+    let drawing = false;
+    function pos(e){
+      const r = canvas.getBoundingClientRect();
+      const cx = e.touches ? e.touches[0].clientX : e.clientX;
+      const cy = e.touches ? e.touches[0].clientY : e.clientY;
+      return { x: (cx-r.left) * (canvas.width/r.width), y: (cy-r.top) * (canvas.height/r.height) };
+    }
+    function start(e){ drawing = true; const p = pos(e); ctx.beginPath(); ctx.moveTo(p.x,p.y); e.preventDefault(); }
+    function move(e){ if(!drawing) return; const p = pos(e); ctx.lineTo(p.x,p.y); ctx.stroke(); e.preventDefault(); }
+    function end(e){ if(!drawing) return; drawing=false; target.setValue(canvas.toDataURL('image/png')); if(e) e.preventDefault(); render(); }
+
+    canvas.addEventListener('mousedown', start);
+    canvas.addEventListener('mousemove', move);
+    canvas.addEventListener('mouseup', end);
+    canvas.addEventListener('mouseleave', end);
+    canvas.addEventListener('touchstart', start, {passive:false});
+    canvas.addEventListener('touchmove', move, {passive:false});
+    canvas.addEventListener('touchend', end, {passive:false});
+  });
+}
+
+function limpiarFirma(fieldId){
+  const canvas = document.querySelector(`.firma-canvas[data-field="${fieldId}"]`);
+  if(canvas){ canvas.getContext('2d').clearRect(0,0,canvas.width,canvas.height); }
+  const target = FIRMA_TARGETS[fieldId];
+  if(target) target.setValue(null);
+}
+
+function firmaPadHtml(fieldId, label){
+  return `
+    <div class="firma-block">
+      <label style="display:block;font-size:12px;font-weight:600;margin-bottom:6px;">${label}</label>
+      <div class="firma-wrap"><canvas class="firma-canvas" data-field="${fieldId}"></canvas></div>
+      <button class="btn ghost" style="width:100%;margin-top:6px;padding:8px;font-size:12.5px;" onclick="limpiarFirma('${fieldId}')">Limpiar firma</button>
+    </div>
+  `;
+}
+
 /* ===================== STEP RAIL ===================== */
-const STEP_LABELS = ['Datos','Riesgo','Tipo','Checklist','Resumen','Envío','Revisión','Resultado'];
+const STEP_LABELS = ['Datos','Riesgo','Tipo','Checklist','EPP/Ambiente','Firmas','Resumen','Envío','Revisión','Resultado'];
 function stepRail(current){
   let html = '<div class="steprail">';
   STEP_LABELS.forEach((lbl,i)=>{
@@ -1115,7 +1227,7 @@ function renderNuevoChecklist(){
     </main>
     <div class="btnbar">
       <button class="btn ghost" onclick="prevChecklist()">Anterior</button>
-      <button class="btn primary" ${!checklistCanAdvance(cl)?'disabled':''} onclick="${isLast?"nav('nuevo-resumen')":"nextChecklist()"}">${isLast?'Guardar y continuar':'Guardar y continuar'}</button>
+      <button class="btn primary" ${!checklistCanAdvance(cl)?'disabled':''} onclick="${isLast?"nav('nuevo-epp')":"nextChecklist()"}">${isLast?'Guardar y continuar':'Guardar y continuar'}</button>
     </div>
   `;
 }
@@ -1149,6 +1261,159 @@ function prevChecklist(){
   else nav(state.draft.tipos.includes('alturas') ? 'nuevo-equipo' : 'nuevo-tipo');
 }
 
+async function subirFotoGenerica(input, subcarpeta){
+  if(!input.files || !input.files[0]) return null;
+  showToast('Subiendo evidencia...');
+  const path = `${state.draft.id}/${subcarpeta}-${Date.now()}.jpg`;
+  const { error } = await sb.storage.from('evidencias').upload(path, input.files[0]);
+  if(error){ console.error(error); showToast('No se pudo subir la foto'); return null; }
+  const { data } = sb.storage.from('evidencias').getPublicUrl(path);
+  showToast('Evidencia adjuntada');
+  return data.publicUrl;
+}
+async function attachEppFoto(input){ const url = await subirFotoGenerica(input,'epp'); if(url){ state.draft.eppFoto = url; render(); } }
+async function attachImpactoFoto(input){ const url = await subirFotoGenerica(input,'impacto'); if(url){ state.draft.impactoFoto = url; render(); } }
+
+function fotoOpcionalBox(label, currentUrl, onChangeFn){
+  return `
+    <div class="ci-photo" style="margin-top:10px;">
+      <label class="photo-box ${currentUrl?'attached':''}" style="${currentUrl?`background-image:url(${currentUrl});background-size:cover;background-position:center;`:''}">
+        ${currentUrl?'':'📷'}
+        <input type="file" accept="image/*" capture="environment" style="display:none" onchange="${onChangeFn}(this)">
+      </label>
+      <span>${currentUrl ? 'Evidencia adjunta' : label}</span>
+    </div>
+  `;
+}
+
+function toggleEpp(nombre){
+  const it = state.draft.epp.find(e=>e.nombre===nombre);
+  it.selected = !it.selected;
+  render();
+}
+function setEppModelo(nombre, value){
+  const it = state.draft.epp.find(e=>e.nombre===nombre);
+  it.modelo = value;
+}
+function agregarResiduo(){ state.draft.residuos.push(nuevoResiduo()); render(); }
+function quitarResiduo(id){
+  if(state.draft.residuos.length<=1){ state.draft.residuos = [nuevoResiduo()]; render(); return; }
+  state.draft.residuos = state.draft.residuos.filter(r=>r.id!==id);
+  render();
+}
+function setResiduoField(id, field, value){
+  const r = state.draft.residuos.find(r=>r.id===id);
+  r[field] = value;
+}
+
+function renderNuevoEppAmbiente(){
+  const e = state.draft.energia;
+  return `
+    ${header('EPP y ambiente', 'PASO 5 · '+state.draft.folio, {back:"nav('nuevo-checklist')"})}
+    <main>
+      ${stepRail(5)}
+      <h2 class="screen-title">Equipo de protección y cuidado ambiental</h2>
+      <p class="screen-sub">Selecciona el EPP requerido y especifica el modelo. Después registra el manejo de residuos y el bloqueo de energías.</p>
+
+      <div class="eyebrow-label">Equipo de Protección Personal (EPP)</div>
+      <div class="card">
+        ${state.draft.epp.map(it=>`
+          <div class="epp-item ${it.selected?'sel':''}" onclick="toggleEpp('${it.nombre}')">
+            <div class="cb" style="width:19px;height:19px;border-radius:5px;border:1.5px solid #C7C2B2;display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff;background:${it.selected?'var(--navy)':'#fff'};flex-shrink:0;">${it.selected?'✓':''}</div>
+            <div style="flex:1;">${it.nombre}</div>
+          </div>
+          ${it.selected ? `<input type="text" placeholder="Modelo (ej. Guante 3M anticorte nivel 4)" value="${it.modelo}" oninput="setEppModelo('${it.nombre}', this.value)" style="width:100%;border:1.5px solid var(--line);border-radius:9px;padding:9px 11px;font-size:13px;margin:-2px 0 10px 0;background:#fbfaf7;">` : ''}
+        `).join('')}
+        ${fotoOpcionalBox('Evidencia fotográfica del EPP (si aplica)', state.draft.eppFoto, 'attachEppFoto')}
+      </div>
+
+      <div class="eyebrow-label" style="margin-top:18px;">Impacto ambiental — control de residuos</div>
+      <p class="screen-sub" style="margin-top:-4px;">Describe los residuos peligrosos, de manejo especial o basura que se van a generar.</p>
+      ${state.draft.residuos.map((r,i)=>`
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <div class="eyebrow-label" style="margin:0;">Residuo ${i+1}</div>
+            ${state.draft.residuos.length>1?`<span style="cursor:pointer;color:var(--red);font-size:12px;font-weight:600;" onclick="quitarResiduo('${r.id}')">Quitar</span>`:''}
+          </div>
+          <div class="field"><label>Descripción</label><textarea oninput="setResiduoField('${r.id}','descripcion',this.value)" placeholder="Ej. Trapos impregnados de aceite">${r.descripcion}</textarea></div>
+          <div class="field"><label>Medidas de control</label><textarea oninput="setResiduoField('${r.id}','control',this.value)" placeholder="Ej. Depositar en contenedor rojo de residuos peligrosos">${r.control}</textarea></div>
+        </div>
+      `).join('')}
+      <button class="btn ghost" style="width:100%;margin-bottom:14px;" onclick="agregarResiduo()">+ Agregar residuo</button>
+      <div class="card">${fotoOpcionalBox('Evidencia fotográfica de residuos (si aplica)', state.draft.impactoFoto, 'attachImpactoFoto')}</div>
+
+      <div class="eyebrow-label" style="margin-top:18px;">Bloqueo de energías</div>
+      <div class="card">
+        <div class="field"><label>¿Hay fuentes de energía (eléctrica, hidráulica, neumática) que representen riesgo y deban bloquearse?</label></div>
+        <div class="ci-opts" style="margin-bottom:10px;">
+          <div class="pill ${e.aplica===true?'on cumple':''}" onclick="state.draft.energia.aplica=true; render()">Sí</div>
+          <div class="pill ${e.aplica===false?'on na':''}" onclick="state.draft.energia.aplica=false; state.draft.energia.cual=''; render()">No</div>
+        </div>
+        ${e.aplica ? `
+          <div class="field"><label>¿Cuál?</label><textarea oninput="state.draft.energia.cual=this.value">${e.cual}</textarea></div>
+          <div class="field"><label>¿Se cuenta con el equipo de bloqueo y candadeo adecuado, aplicado correctamente?</label></div>
+          <div class="ci-opts" style="margin-bottom:10px;">
+            <div class="pill ${e.bloqueoOk===true?'on cumple':''}" onclick="state.draft.energia.bloqueoOk=true; render()">Sí</div>
+            <div class="pill ${e.bloqueoOk===false?'on na':''}" onclick="state.draft.energia.bloqueoOk=false; render()">No</div>
+          </div>
+          <div class="field"><label>¿Existe alguna energía remanente? Indica cuál y cómo va a ser liberada</label><textarea oninput="state.draft.energia.remanente=this.value">${e.remanente}</textarea></div>
+        ` : ''}
+      </div>
+    </main>
+    <div class="btnbar">
+      <button class="btn ghost" onclick="nav('nuevo-checklist')">Anterior</button>
+      <button class="btn primary" ${!eppAmbienteListo()?'disabled':''} onclick="nav('nuevo-firmas')">Siguiente</button>
+    </div>
+  `;
+}
+function eppAmbienteListo(){
+  const e = state.draft.energia;
+  if(e.aplica===null) return false;
+  if(e.aplica===true && (!e.cual || e.bloqueoOk===null)) return false;
+  return true;
+}
+
+function renderNuevoFirmas(){
+  const n = state.draft.firmasNombres;
+  registrarFirmaTarget('contratista', ()=>state.draft.firmas.contratista, v=>{ state.draft.firmas.contratista=v; });
+  registrarFirmaTarget('responsable_interno', ()=>state.draft.firmas.responsable_interno, v=>{ state.draft.firmas.responsable_interno=v; });
+  registrarFirmaTarget('supervisor', ()=>state.draft.firmas.supervisor, v=>{ state.draft.firmas.supervisor=v; });
+  return `
+    ${header('Firmas de autorización', 'PASO 6 · '+state.draft.folio, {back:"nav('nuevo-epp')"})}
+    <main>
+      ${stepRail(6)}
+      <h2 class="screen-title">Autorizaciones para el trabajo</h2>
+      <p class="screen-sub">Cada persona firma con el dedo directamente sobre la pantalla. La firma del Jefe de Seguridad se captura al momento de aprobar.</p>
+
+      <div class="card">
+        <div class="field"><label>Nombre — Responsable de realizar la tarea (Contratista)</label><input type="text" id="fn_contratista" value="${n.contratista}" oninput="state.draft.firmasNombres.contratista=this.value; render()">
+        </div>
+        ${firmaPadHtml('contratista', 'Firma del Contratista')}
+      </div>
+
+      <div class="card">
+        <div class="field"><label>Nombre — Responsable interno</label><input type="text" id="fn_responsable_interno" value="${n.responsable_interno}" oninput="state.draft.firmasNombres.responsable_interno=this.value; render()">
+        </div>
+        ${firmaPadHtml('responsable_interno', 'Firma del Responsable Interno')}
+      </div>
+
+      <div class="card">
+        <div class="field"><label>Nombre — Supervisor de seguridad</label><input type="text" id="fn_supervisor" value="${n.supervisor}" oninput="state.draft.firmasNombres.supervisor=this.value; render()">
+        </div>
+        ${firmaPadHtml('supervisor', 'Firma del Supervisor de Seguridad')}
+      </div>
+    </main>
+    <div class="btnbar">
+      <button class="btn ghost" onclick="nav('nuevo-epp')">Anterior</button>
+      <button class="btn primary" ${!firmasListas()?'disabled':''} onclick="nav('nuevo-resumen')">Siguiente</button>
+    </div>
+  `;
+}
+function firmasListas(){
+  const n = state.draft.firmasNombres, f = state.draft.firmas;
+  return n.contratista && f.contratista && n.responsable_interno && f.responsable_interno && n.supervisor && f.supervisor;
+}
+
 function renderResumen(){
   const d = state.draft.datos;
   const total = state.draft.checklists.length;
@@ -1159,9 +1424,9 @@ function renderResumen(){
   const riesgoMax = nivelesRiesgo.length ? Math.max(...nivelesRiesgo) : null;
   const bandMax = riskBand(riesgoMax);
   return `
-    ${header('Resumen del APR', 'PASO 5 · '+state.draft.folio, {back:"nav('nuevo-checklist')"})}
+    ${header('Resumen del APR', 'PASO 7 · '+state.draft.folio, {back:"nav('nuevo-firmas')"})}
     <main>
-      ${stepRail(5)}
+      ${stepRail(7)}
       <h2 class="screen-title">Resumen del APR</h2>
       <p class="screen-sub">Verifica la información antes de enviarla al jefe de EHS.</p>
       <div class="card">
@@ -1178,7 +1443,7 @@ function renderResumen(){
       </div>
     </main>
     <div class="btnbar">
-      <button class="btn ghost" onclick="nav('nuevo-checklist')">Anterior</button>
+      <button class="btn ghost" onclick="nav('nuevo-firmas')">Anterior</button>
       <button class="btn primary" ${!ready?'disabled':''} onclick="enviarAEhs()">Enviar a EHS</button>
     </div>
   `;
@@ -1200,6 +1465,20 @@ async function guardarAprEnBD(draft){
     equipo: draft.equipo,
     clima_aplica: draft.clima.aplica,
     clima_medidas: draft.clima.medidas || null,
+    epp: draft.epp.filter(e=>e.selected),
+    epp_foto: draft.eppFoto || null,
+    residuos: draft.residuos,
+    impacto_foto: draft.impactoFoto || null,
+    energia_aplica: draft.energia.aplica,
+    energia_cual: draft.energia.cual || null,
+    energia_bloqueo_ok: draft.energia.bloqueoOk,
+    energia_remanente: draft.energia.remanente || null,
+    firma_contratista: draft.firmas.contratista,
+    firma_contratista_nombre: draft.firmasNombres.contratista,
+    firma_responsable_interno: draft.firmas.responsable_interno,
+    firma_responsable_interno_nombre: draft.firmasNombres.responsable_interno,
+    firma_supervisor: draft.firmas.supervisor,
+    firma_supervisor_nombre: draft.firmasNombres.supervisor,
     status: 'pendiente',
   }).select().single();
   if(error){ console.error(error); return null; }
@@ -1255,7 +1534,7 @@ function renderEnviado(){
   return `
     ${header('Enviado', '', {})}
     <main style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding-top:60px;">
-      ${stepRail(6)}
+      ${stepRail(8)}
       <div style="font-size:52px;margin-bottom:14px;">📧</div>
       <h2 class="screen-title">El APR se envía automáticamente</h2>
       <p class="screen-sub">${state.draft.folio} fue enviado al jefe de EHS para su revisión y aprobación. Recibirás una notificación con el resultado.</p>
@@ -1286,13 +1565,60 @@ function riesgoResumenCard(a){
   `;
 }
 
+function renderDetalleCompleto(a){
+  const epp = a.epp || [];
+  const residuos = a.residuos || [];
+  const e = a.energia || {};
+  let html = '';
+
+  if(epp.length){
+    html += `<div class="eyebrow-label" style="margin-top:16px;">Equipo de Protección Personal</div>
+    <div class="card">
+      ${epp.map(it=>`<div style="font-size:13px;margin-bottom:4px;">• ${it.nombre}${it.modelo?' — '+it.modelo:''}</div>`).join('')}
+      ${a.eppFoto?`<img src="${a.eppFoto}" style="width:100%;border-radius:9px;margin-top:8px;">`:''}
+    </div>`;
+  }
+  if(residuos.length && residuos.some(r=>r.descripcion||r.control)){
+    html += `<div class="eyebrow-label" style="margin-top:16px;">Impacto ambiental — residuos</div>
+    ${residuos.filter(r=>r.descripcion||r.control).map(r=>`
+      <div class="card"><div style="font-size:13px;"><b>${r.descripcion||'—'}</b></div><div style="font-size:12px;color:var(--muted);margin-top:4px;">${r.control||'—'}</div></div>
+    `).join('')}
+    ${a.impactoFoto?`<div class="card"><img src="${a.impactoFoto}" style="width:100%;border-radius:9px;"></div>`:''}`;
+  }
+  if(e.aplica!==null && e.aplica!==undefined){
+    html += `<div class="eyebrow-label" style="margin-top:16px;">Bloqueo de energías</div>
+    <div class="card">
+      <div class="summary-row"><div class="k">¿Aplica?</div><div class="v">${e.aplica?'Sí':'No'}</div></div>
+      ${e.aplica?`
+        <div class="summary-row"><div class="k">¿Cuál?</div><div class="v">${e.cual||'—'}</div></div>
+        <div class="summary-row"><div class="k">Bloqueo aplicado correctamente</div><div class="v">${e.bloqueoOk?'Sí':'No'}</div></div>
+        <div class="summary-row"><div class="k">Energía remanente</div><div class="v">${e.remanente||'—'}</div></div>
+      `:''}
+    </div>`;
+  }
+  if(a.firmas && (a.firmas.contratista || a.firmas.responsable_interno || a.firmas.supervisor)){
+    html += `<div class="eyebrow-label" style="margin-top:16px;">Firmas de autorización</div>
+    <div class="card">
+      ${['contratista','responsable_interno','supervisor'].map(k=>{
+        const labels = {contratista:'Contratista', responsable_interno:'Responsable Interno', supervisor:'Supervisor de Seguridad'};
+        if(!a.firmas[k]) return '';
+        return `<div style="margin-bottom:12px;"><div style="font-size:12px;font-weight:600;">${labels[k]} — ${a.firmasNombres[k]||''}</div><img src="${a.firmas[k]}" style="max-width:220px;border:1px solid var(--line);border-radius:8px;margin-top:4px;background:#fff;"></div>`;
+      }).join('')}
+      ${a.firmaJefeSeguridad?`<div><div style="font-size:12px;font-weight:600;">Jefe de Seguridad — ${a.firmaJefeSeguridadNombre||''}</div><img src="${a.firmaJefeSeguridad}" style="max-width:220px;border:1px solid var(--line);border-radius:8px;margin-top:4px;background:#fff;"></div>`:''}
+    </div>`;
+  }
+  return html;
+}
+
 function renderRevision(){
   const a = state.draft;
   const d = a.datos;
+  if(!state.tempFirmaJefe) state.tempFirmaJefe = { nombre: (state.profile && state.profile.nombre) || '', firma: null };
+  registrarFirmaTarget('jefe_seguridad', ()=>state.tempFirmaJefe.firma, v=>{ state.tempFirmaJefe.firma=v; });
   return `
     ${header('Revisión APR: '+a.folio, 'VISTA JEFE DE EHS', {back:"nav('landing')"})}
     <main>
-      ${stepRail(7)}
+      ${stepRail(9)}
       <div class="card">
         <div class="summary-row"><div class="k">Empresa contratista</div><div class="v">${d.empresa}</div></div>
         <div class="summary-row"><div class="k">Área</div><div class="v">${d.area}</div></div>
@@ -1303,13 +1629,19 @@ function renderRevision(){
         <div class="summary-row"><div class="k">Estatus actual</div><div class="v">${statusBadge(a.status)}</div></div>
       </div>
       ${riesgoResumenCard(a)}
+      ${renderDetalleCompleto(a)}
       <div class="eyebrow-label" style="margin-top:18px;">Comentarios (obligatorio si rechaza o solicita correcciones)</div>
       <div class="card" style="padding:10px;">
         <textarea id="ehs_comment" placeholder="Escribe tu comentario..."></textarea>
       </div>
+      <div class="eyebrow-label" style="margin-top:18px;">Firma del Jefe de Seguridad (requerida para aprobar)</div>
+      <div class="card">
+        <div class="field"><label>Nombre</label><input type="text" id="fn_jefe_seguridad" value="${state.tempFirmaJefe.nombre}" oninput="state.tempFirmaJefe.nombre=this.value; render()"></div>
+        ${firmaPadHtml('jefe_seguridad', 'Firma del Jefe de Seguridad')}
+      </div>
       <div class="eyebrow-label" style="margin-top:18px;">Acciones del jefe de EHS</div>
       <div style="display:flex;flex-direction:column;gap:9px;">
-        <button class="btn success" onclick="ehsDecision('autorizado')">✓ Aprobar APR</button>
+        <button class="btn success" ${!(state.tempFirmaJefe.nombre && state.tempFirmaJefe.firma)?'disabled':''} onclick="ehsDecision('autorizado')">✓ Aprobar APR</button>
         <button class="btn danger" onclick="ehsDecision('rechazado')">✕ Rechazar APR</button>
         <button class="btn outline-amber" onclick="ehsDecision('correccion')">✎ Solicitar correcciones</button>
       </div>
@@ -1320,7 +1652,14 @@ function renderRevision(){
 async function ehsDecision(decision){
   const comment = val('ehs_comment');
   if(decision!=='autorizado' && !comment){ showToast('El comentario es obligatorio para esta decisión'); return; }
-  await sb.from('aprs').update({ status: decision }).eq('id', state.draft.id);
+  const update = { status: decision };
+  if(decision==='autorizado'){
+    update.firma_jefe_seguridad = state.tempFirmaJefe.firma;
+    update.firma_jefe_seguridad_nombre = state.tempFirmaJefe.nombre;
+    state.draft.firmaJefeSeguridad = state.tempFirmaJefe.firma;
+    state.draft.firmaJefeSeguridadNombre = state.tempFirmaJefe.nombre;
+  }
+  await sb.from('aprs').update(update).eq('id', state.draft.id);
   if(comment){
     await sb.from('comentarios').insert({ apr_id: state.draft.id, texto: comment });
     state.draft.comments.push(comment);
@@ -1331,6 +1670,7 @@ async function ehsDecision(decision){
     texto: `APR ${state.draft.folio} ${map[decision]}`,
   });
   state.draft.status = decision;
+  state.tempFirmaJefe = null;
   await loadAprsFromDB();
   showToast('Decisión enviada');
   nav('resultado');
@@ -1348,28 +1688,23 @@ function renderResultado(){
     cerrado: {emoji:'🔒', title:'Cerrado', txt:'El trabajo ha finalizado y fue cerrado.'},
   }[a.status];
   const canStart = a.status==='autorizado';
-  const canClose = a.status==='ejecucion';
+  const canDeliver = a.status==='ejecucion';
   return `
     ${header('Resultado final', a.folio, {back:"nav('landing')"})}
     <main style="text-align:center;padding-top:20px;">
-      ${stepRail(8)}
+      ${stepRail(10)}
       <div style="font-size:56px;margin:10px 0;">${info.emoji}</div>
       <h2 class="screen-title" style="text-align:center;">${info.title}</h2>
       <p class="screen-sub">${info.txt}</p>
       <div style="margin:14px 0;">${statusBadge(a.status)}</div>
       ${a.comments.length ? `<div class="card" style="text-align:left;"><div class="eyebrow-label">Comentarios del jefe de EHS</div>${a.comments.map(c=>`<div style="font-size:13px;margin-bottom:6px;">"${c}"</div>`).join('')}</div>` : ''}
       <div style="text-align:left;">${riesgoResumenCard(a)}</div>
-      <div class="card" style="text-align:left;">
-        <div class="eyebrow-label">Firmas requeridas</div>
-        <div style="font-size:13px;line-height:1.9;">
-          🖊️ Contratista&nbsp;&nbsp;&nbsp;👤 Responsable interno<br>
-          🦺 Supervisor de seguridad&nbsp;&nbsp;&nbsp;✅ Jefe de EHS
-        </div>
-      </div>
+      <div style="text-align:left;">${renderDetalleCompleto(a)}</div>
+      ${a.entrega ? `<div style="text-align:left;">${renderEntregaResumen(a.entrega)}</div>` : ''}
     </main>
     <div class="btnbar" style="flex-direction:column;">
       ${canStart?`<button class="btn success" onclick="a_setStatus('ejecucion')">Iniciar ejecución del trabajo</button>`:''}
-      ${canClose?`<button class="btn primary" onclick="a_setStatus('cerrado')">Cerrar APR</button>`:''}
+      ${canDeliver?`<button class="btn primary" onclick="abrirEntrega()">Registrar entrega de la tarea</button>`:''}
       <button class="btn ghost" style="flex:1;" onclick="nav('landing')">Volver al inicio</button>
     </div>
   `;
@@ -1383,6 +1718,153 @@ async function a_setStatus(s){
   state.draft.status = s;
   await loadAprsFromDB();
   render();
+}
+
+function nuevoInvolucrado(){ return { id:'inv_'+Math.random().toString(36).slice(2,9), nombre:'', firma:null }; }
+
+function abrirEntrega(){
+  state.entregaDraft = {
+    seguro: null, orden: null, residuosOk: null, cumple: null, medidas: '', foto: null,
+    involucrados: [nuevoInvolucrado()],
+    inspeccion: {
+      tarea: { nombre:'', firma:null },
+      area: { nombre:'', firma:null },
+      ehs: { nombre:'', firma:null },
+    },
+  };
+  nav('entrega');
+}
+
+async function attachEntregaFoto(input){
+  const url = await subirFotoGenerica(input, 'entrega');
+  if(url){ state.entregaDraft.foto = url; render(); }
+}
+function agregarInvolucrado(){ state.entregaDraft.involucrados.push(nuevoInvolucrado()); render(); }
+function quitarInvolucrado(id){
+  if(state.entregaDraft.involucrados.length<=1){ state.entregaDraft.involucrados=[nuevoInvolucrado()]; render(); return; }
+  state.entregaDraft.involucrados = state.entregaDraft.involucrados.filter(i=>i.id!==id);
+  render();
+}
+
+function renderEntrega(){
+  const e = state.entregaDraft;
+  e.involucrados.forEach(inv=>{
+    registrarFirmaTarget('inv_'+inv.id, ()=>inv.firma, v=>{ inv.firma=v; });
+  });
+  registrarFirmaTarget('insp_tarea', ()=>e.inspeccion.tarea.firma, v=>{ e.inspeccion.tarea.firma=v; });
+  registrarFirmaTarget('insp_area', ()=>e.inspeccion.area.firma, v=>{ e.inspeccion.area.firma=v; });
+  registrarFirmaTarget('insp_ehs', ()=>e.inspeccion.ehs.firma, v=>{ e.inspeccion.ehs.firma=v; });
+
+  const preguntas = [
+    ['seguro', '¿Se dejó en condiciones de operación segura?'],
+    ['orden', '¿El área que se entregó se encuentra con orden y limpieza?'],
+    ['residuosOk', '¿La basura, desperdicio y/o residuos se depositaron en su contenedor correspondiente?'],
+    ['cumple', '¿El trabajo realizado cumple con lo solicitado?'],
+  ];
+  return `
+    ${header('Entrega de la tarea', state.draft.folio, {back:"nav('resultado')"})}
+    <main>
+      <h2 class="screen-title">Entrega de la tarea</h2>
+      <p class="screen-sub">Se llena una vez terminada la tarea.</p>
+      <div class="card">
+        ${preguntas.map(([key,label])=>`
+          <div class="field"><label>${label}</label></div>
+          <div class="ci-opts" style="margin-bottom:12px;">
+            <div class="pill ${e[key]===true?'on cumple':''}" onclick="state.entregaDraft.${key}=true; render()">Sí</div>
+            <div class="pill ${e[key]===false?'on na':''}" onclick="state.entregaDraft.${key}=false; render()">No</div>
+          </div>
+        `).join('')}
+        ${(e.seguro===false||e.orden===false||e.residuosOk===false||e.cumple===false) ? `
+          <div class="field"><label>Medidas de control a tomar</label><textarea oninput="state.entregaDraft.medidas=this.value">${e.medidas}</textarea></div>
+        ` : ''}
+        ${fotoOpcionalBox('Evidencia fotográfica de la entrega (si aplica)', e.foto, 'attachEntregaFoto')}
+      </div>
+
+      <div class="eyebrow-label" style="margin-top:16px;">Nombre y firma de los involucrados en realizar la tarea</div>
+      ${e.involucrados.map((inv,i)=>`
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <div class="eyebrow-label" style="margin:0;">Persona ${i+1}</div>
+            ${e.involucrados.length>1?`<span style="cursor:pointer;color:var(--red);font-size:12px;font-weight:600;" onclick="quitarInvolucrado('${inv.id}')">Quitar</span>`:''}
+          </div>
+          <div class="field"><label>Nombre</label><input type="text" id="inv_nombre_${inv.id}" value="${inv.nombre}" oninput="state.entregaDraft.involucrados.find(x=>x.id==='${inv.id}').nombre=this.value; render()"></div>
+          ${firmaPadHtml('inv_'+inv.id, 'Firma')}
+        </div>
+      `).join('')}
+      <button class="btn ghost" style="width:100%;margin-bottom:14px;" onclick="agregarInvolucrado()">+ Agregar persona</button>
+
+      <div class="eyebrow-label" style="margin-top:16px;">Inspección final</div>
+      <div class="card">
+        <div class="field"><label>Nombre — Responsable de la tarea</label><input type="text" id="insp_tarea_n" value="${e.inspeccion.tarea.nombre}" oninput="state.entregaDraft.inspeccion.tarea.nombre=this.value; render()"></div>
+        ${firmaPadHtml('insp_tarea', 'Firma — Responsable de la tarea')}
+      </div>
+      <div class="card">
+        <div class="field"><label>Nombre — Responsable del área</label><input type="text" id="insp_area_n" value="${e.inspeccion.area.nombre}" oninput="state.entregaDraft.inspeccion.area.nombre=this.value; render()"></div>
+        ${firmaPadHtml('insp_area', 'Firma — Responsable del área')}
+      </div>
+      <div class="card">
+        <div class="field"><label>Nombre — EHS</label><input type="text" id="insp_ehs_n" value="${e.inspeccion.ehs.nombre}" oninput="state.entregaDraft.inspeccion.ehs.nombre=this.value; render()"></div>
+        ${firmaPadHtml('insp_ehs', 'Firma — EHS')}
+      </div>
+    </main>
+    <div class="btnbar">
+      <button class="btn ghost" onclick="nav('resultado')">Cancelar</button>
+      <button class="btn primary" ${!entregaLista()?'disabled':''} onclick="guardarEntrega()">Guardar y cerrar APR</button>
+    </div>
+  `;
+}
+
+function entregaLista(){
+  const e = state.entregaDraft;
+  if(e.seguro===null||e.orden===null||e.residuosOk===null||e.cumple===null) return false;
+  if((e.seguro===false||e.orden===false||e.residuosOk===false||e.cumple===false) && !e.medidas) return false;
+  if(!e.involucrados.every(i=>i.nombre && i.firma)) return false;
+  if(!e.inspeccion.tarea.nombre || !e.inspeccion.tarea.firma) return false;
+  if(!e.inspeccion.area.nombre || !e.inspeccion.area.firma) return false;
+  if(!e.inspeccion.ehs.nombre || !e.inspeccion.ehs.firma) return false;
+  return true;
+}
+
+async function guardarEntrega(){
+  const e = state.entregaDraft;
+  await sb.from('aprs').update({ entrega: e, status: 'cerrado' }).eq('id', state.draft.id);
+  await sb.from('notificaciones').insert({
+    apr_id: state.draft.id, para_rol: 'solicitante',
+    texto: `APR ${state.draft.folio} cerrado — entrega de tarea registrada`,
+  });
+  state.draft.entrega = e;
+  state.draft.status = 'cerrado';
+  state.entregaDraft = null;
+  await loadAprsFromDB();
+  showToast('Entrega registrada, APR cerrado');
+  nav('resultado');
+}
+
+function renderEntregaResumen(entrega){
+  const preguntas = [
+    ['seguro','¿Condiciones de operación segura?'],['orden','¿Orden y limpieza?'],
+    ['residuosOk','¿Residuos en su contenedor?'],['cumple','¿Cumple lo solicitado?'],
+  ];
+  return `
+    <div class="eyebrow-label" style="margin-top:16px;">Entrega de la tarea</div>
+    <div class="card">
+      ${preguntas.map(([k,l])=>`<div class="summary-row"><div class="k">${l}</div><div class="v">${entrega[k]?'Sí':'No'}</div></div>`).join('')}
+      ${entrega.medidas?`<div style="font-size:13px;margin-top:8px;"><b>Medidas de control:</b> ${entrega.medidas}</div>`:''}
+      ${entrega.foto?`<img src="${entrega.foto}" style="width:100%;border-radius:9px;margin-top:8px;">`:''}
+    </div>
+    <div class="eyebrow-label" style="margin-top:12px;">Involucrados</div>
+    <div class="card">
+      ${entrega.involucrados.map(i=>`<div style="margin-bottom:10px;"><div style="font-size:12px;font-weight:600;">${i.nombre}</div>${i.firma?`<img src="${i.firma}" style="max-width:180px;border:1px solid var(--line);border-radius:8px;margin-top:4px;background:#fff;">`:''}</div>`).join('')}
+    </div>
+    <div class="eyebrow-label" style="margin-top:12px;">Inspección final</div>
+    <div class="card">
+      ${['tarea','area','ehs'].map(k=>{
+        const labels = {tarea:'Responsable de la tarea', area:'Responsable del área', ehs:'EHS'};
+        const insp = entrega.inspeccion[k];
+        return `<div style="margin-bottom:10px;"><div style="font-size:12px;font-weight:600;">${labels[k]} — ${insp.nombre}</div>${insp.firma?`<img src="${insp.firma}" style="max-width:180px;border:1px solid var(--line);border-radius:8px;margin-top:4px;background:#fff;">`:''}</div>`;
+      }).join('')}
+    </div>
+  `;
 }
 
 function renderNotificaciones(){
@@ -1488,9 +1970,12 @@ function render(){
     case 'nuevo-tipo': html += renderNuevoTipo(); break;
     case 'nuevo-equipo': html += renderNuevoEquipo(); break;
     case 'nuevo-checklist': html += renderNuevoChecklist(); break;
+    case 'nuevo-epp': html += renderNuevoEppAmbiente(); break;
+    case 'nuevo-firmas': html += renderNuevoFirmas(); break;
     case 'nuevo-resumen': html += renderResumen(); break;
     case 'enviado': html += renderEnviado(); break;
     case 'revision': html += renderRevision(); break;
+    case 'entrega': html += renderEntrega(); break;
     case 'resultado': html += renderResultado(); break;
     case 'notificaciones': html += renderNotificaciones(); break;
     case 'admin': html += renderAdmin(); break;
@@ -1498,6 +1983,7 @@ function render(){
     default: html += renderLanding();
   }
   document.getElementById('app').innerHTML = html;
+  initFirmasPads();
 
   if(activeId){
     const el = document.getElementById(activeId);
