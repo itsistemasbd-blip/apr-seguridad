@@ -990,8 +990,8 @@ function renderPasoRiesgo(p, i){
         <div class="eyebrow-label" style="margin:0;">Paso ${i+1}</div>
         ${state.draft.pasos.length>1 ? `<span style="cursor:pointer;color:var(--red);font-size:12px;font-weight:600;" onclick="quitarPaso('${p.id}')">Quitar</span>` : ''}
       </div>
-      <div class="field"><label>Secuencia de actividad</label><textarea oninput="setPasoField('${p.id}','descripcion',this.value)" placeholder="Ej. Retirar guarda de protección de la banda">${p.descripcion}</textarea></div>
-      <div class="field"><label>Peligro potencial</label><textarea oninput="setPasoField('${p.id}','peligro',this.value)" placeholder="Ej. Atrapamiento por partes en movimiento">${p.peligro}</textarea></div>
+      <div class="field"><label>Secuencia de actividad</label><textarea id="paso_desc_${p.id}" oninput="setPasoField('${p.id}','descripcion',this.value)" placeholder="Ej. Retirar guarda de protección de la banda">${p.descripcion}</textarea></div>
+      <div class="field"><label>Peligro potencial</label><textarea id="paso_peligro_${p.id}" oninput="setPasoField('${p.id}','peligro',this.value)" placeholder="Ej. Atrapamiento por partes en movimiento">${p.peligro}</textarea></div>
       <div class="row2">
         <div class="field"><label>Severidad (S)</label>
           <select onchange="setPasoField('${p.id}','s',this.value)">
@@ -1021,7 +1021,7 @@ function renderPasoRiesgo(p, i){
         </div>
       </div>
       <div style="margin:6px 0 12px 0;"><span class="badge ${band.cls}">${band.label}</span></div>
-      <div class="field"><label>Medidas de control para reducir o eliminar el riesgo</label><textarea oninput="setPasoField('${p.id}','controles',this.value)" placeholder="Ej. Bloqueo y etiquetado antes de retirar la guarda">${p.controles}</textarea></div>
+      <div class="field"><label>Medidas de control para reducir o eliminar el riesgo</label><textarea id="paso_controles_${p.id}" oninput="setPasoField('${p.id}','controles',this.value)" placeholder="Ej. Bloqueo y etiquetado antes de retirar la guarda">${p.controles}</textarea></div>
     </div>
   `;
 }
@@ -1473,6 +1473,11 @@ function renderReglas(){
 
 /* ===================== ROUTER ===================== */
 function render(){
+  const activeEl = document.activeElement;
+  const activeId = activeEl && activeEl.id ? activeEl.id : null;
+  const selStart = activeId && typeof activeEl.selectionStart === 'number' ? activeEl.selectionStart : null;
+  const selEnd = activeId && typeof activeEl.selectionEnd === 'number' ? activeEl.selectionEnd : null;
+
   let html = '<div class="ticket-rail"></div>';
   switch(state.screen){
     case 'login': html += renderLogin(); break;
@@ -1493,6 +1498,16 @@ function render(){
     default: html += renderLanding();
   }
   document.getElementById('app').innerHTML = html;
+
+  if(activeId){
+    const el = document.getElementById(activeId);
+    if(el){
+      el.focus();
+      if(selStart!==null && el.setSelectionRange){
+        try{ el.setSelectionRange(selStart, selEnd); }catch(e){}
+      }
+    }
+  }
 }
 
 render();
