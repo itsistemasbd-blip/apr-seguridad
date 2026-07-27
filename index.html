@@ -1016,13 +1016,25 @@ function renderLanding(){
 
 function aprMiniCard(a){
   return `
-    <div class="apr-card" onclick="goToStatusScreen('${a.id}')">
-      <div class="flex1">
+    <div class="apr-card">
+      <div class="flex1" style="cursor:pointer;" onclick="goToStatusScreen('${a.id}')">
         <div class="fnum">${a.folio}</div>
         <div class="meta">${a.datos.empresa || 'Sin empresa'} · ${a.datos.area || 'Sin área'}</div>
       </div>
       ${statusBadge(a.status)}
+      ${state.isAdmin ? `<span title="Eliminar APR" style="margin-left:10px;cursor:pointer;color:var(--red);font-size:15px;" onclick="event.stopPropagation(); eliminarAprAdmin('${a.id}','${a.folio}')">🗑️</span>` : ''}
     </div>`;
+}
+
+async function eliminarAprAdmin(id, folio){
+  if(!confirm(`¿Eliminar definitivamente el APR ${folio}? Esta acción no se puede deshacer.`)) return false;
+  const { error } = await sb.from('aprs').delete().eq('id', id);
+  if(error){ console.error(error); showToast('No se pudo eliminar el APR'); return false; }
+  showToast(`APR ${folio} eliminado`);
+  await loadAprsFromDB();
+  if(state.searchDone) await buscarPorFolio();
+  render();
+  return true;
 }
 
 async function goToStatusScreen(id){
@@ -1759,6 +1771,7 @@ function renderResultado(){
       ${canStart?`<button class="btn success" onclick="a_setStatus('ejecucion')">Iniciar ejecución del trabajo</button>`:''}
       ${canDeliver?`<button class="btn primary" onclick="abrirEntrega()">Registrar entrega de la tarea</button>`:''}
       ${state.isAdmin?`<button class="btn ghost" onclick="generarPDF()">📄 Descargar PDF del APR</button>`:''}
+      ${state.isAdmin?`<button class="btn ghost" style="color:var(--red);" onclick="eliminarAprAdmin(state.draft.id, state.draft.folio).then(ok=>{ if(ok) nav('landing'); })">🗑️ Eliminar este APR</button>`:''}
       <button class="btn ghost" style="flex:1;" onclick="nav('landing')">Volver al inicio</button>
     </div>
   `;
@@ -2286,16 +2299,37 @@ function renderAdminUsuarios(){
   return `
     ${header('Usuarios y roles', 'ADMINISTRACIÓN', {back:"nav('admin')"})}
     <main>
-      <div class="card-grid">${state.adminUsers.length ? state.adminUsers.map(u=>`
+      <div class="card-grid">${state.adminUsers.length ? state.adminUsers.map(u=>{
+        const esUnoMismo = state.user && u.id === state.user.id;
+        return `
         <div class="card" style="padding:12px 14px;">
-          <div style="font-weight:600;font-size:13.5px;margin-bottom:8px;">${u.nombre || u.id}</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <div style="font-weight:600;font-size:13.5px;">${u.nombre || u.id}</div>
+            ${esUnoMismo ? '' : `<span title="Eliminar usuario" style="cursor:pointer;color:var(--red);font-size:15px;" onclick="eliminarUsuarioAdmin('${u.id}','${(u.nombre||u.id).replace(/'/g,"")}')">🗑️</span>`}
+          </div>
           <select onchange="cambiarRolUsuario('${u.id}', this.value)">
             ${roles.map(r=>`<option value="${r}" ${u.rol===r?'selected':''}>${ROLE_LABELS[r]}</option>`).join('')}
           </select>
+          ${esUnoMismo ? '<div style="font-size:10.5px;color:var(--muted);margin-top:6px;">Este es tu propio usuario</div>' : ''}
         </div>
-      `).join('') : '<div class="empty-state">No hay usuarios registrados todavía.</div>'}</div>
+      `;
+      }).join('') : '<div class="empty-state">No hay usuarios registrados todavía.</div>'}</div>
     </main>
   `;
+}
+
+async function eliminarUsuarioAdmin(userId, nombre){
+  if(!confirm(`¿Eliminar definitivamente al usuario "${nombre}"? Ya no podrá iniciar sesión.`)) return;
+  showToast('Eliminando usuario...');
+  const { data, error } = await sb.functions.invoke('delete-user', { body: { userId } });
+  if(error || (data && data.error)){
+    showToast('No se pudo eliminar: ' + ((data && data.error) || error.message));
+    console.error(error || (data && data.error));
+    return;
+  }
+  showToast('Usuario eliminado');
+  await loadUsuariosAdmin();
+  render();
 }
 
 async function crearUsuarioAdmin(){
