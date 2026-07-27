@@ -611,6 +611,7 @@ let state = {
   role: 'user', // 'user' | 'ehs' — se determina por el rol real del perfil, ya no es un selector manual
   isAdmin: false,
   adminUsers: [],
+  resetPasswordFor: null,
   user: null,
   profile: null,
   aprs: [], // resumen (folio, empresa, area, status) cargado de Supabase
@@ -2301,21 +2302,48 @@ function renderAdminUsuarios(){
     <main>
       <div class="card-grid">${state.adminUsers.length ? state.adminUsers.map(u=>{
         const esUnoMismo = state.user && u.id === state.user.id;
+        const esAdmin = u.rol === 'jefe_seguridad';
+        const mostrandoReset = state.resetPasswordFor === u.id;
         return `
         <div class="card" style="padding:12px 14px;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
             <div style="font-weight:600;font-size:13.5px;">${u.nombre || u.id}</div>
-            ${esUnoMismo ? '' : `<span title="Eliminar usuario" style="cursor:pointer;color:var(--red);font-size:15px;" onclick="eliminarUsuarioAdmin('${u.id}','${(u.nombre||u.id).replace(/'/g,"")}')">🗑️</span>`}
+            <div style="display:flex;gap:10px;align-items:center;">
+              <span title="Restablecer contraseña" style="cursor:pointer;font-size:15px;" onclick="state.resetPasswordFor = state.resetPasswordFor==='${u.id}' ? null : '${u.id}'; render()">🔑</span>
+              ${(esUnoMismo || esAdmin) ? '' : `<span title="Eliminar usuario" style="cursor:pointer;color:var(--red);font-size:15px;" onclick="eliminarUsuarioAdmin('${u.id}','${(u.nombre||u.id).replace(/'/g,"")}')">🗑️</span>`}
+            </div>
           </div>
           <select onchange="cambiarRolUsuario('${u.id}', this.value)">
             ${roles.map(r=>`<option value="${r}" ${u.rol===r?'selected':''}>${ROLE_LABELS[r]}</option>`).join('')}
           </select>
           ${esUnoMismo ? '<div style="font-size:10.5px;color:var(--muted);margin-top:6px;">Este es tu propio usuario</div>' : ''}
+          ${esAdmin && !esUnoMismo ? '<div style="font-size:10.5px;color:var(--muted);margin-top:6px;">Los administradores no se pueden eliminar desde aquí</div>' : ''}
+          ${mostrandoReset ? `
+            <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line);">
+              <input type="text" id="reset_pass_${u.id}" placeholder="Nueva contraseña (mín. 6 caracteres)" style="width:100%;border:1.5px solid var(--line);border-radius:9px;padding:8px 10px;font-size:13px;background:#fbfaf7;margin-bottom:8px;">
+              <button class="btn primary" style="width:100%;padding:8px;font-size:12.5px;" onclick="restablecerPasswordAdmin('${u.id}')">Guardar nueva contraseña</button>
+            </div>
+          ` : ''}
         </div>
       `;
       }).join('') : '<div class="empty-state">No hay usuarios registrados todavía.</div>'}</div>
     </main>
   `;
+}
+
+async function restablecerPasswordAdmin(userId){
+  const nueva = val('reset_pass_'+userId);
+  if(!nueva || nueva.length < 6){ showToast('La contraseña debe tener al menos 6 caracteres'); return; }
+  showToast('Actualizando contraseña...');
+  const { data, error } = await sb.functions.invoke('reset-password', { body: { userId, newPassword: nueva } });
+  if(error || (data && data.error)){
+    showToast('No se pudo actualizar: ' + ((data && data.error) || error.message));
+    console.error(error || (data && data.error));
+    return;
+  }
+  showToast('Contraseña actualizada');
+  state.resetPasswordFor = null;
+  render();
 }
 
 async function eliminarUsuarioAdmin(userId, nombre){
