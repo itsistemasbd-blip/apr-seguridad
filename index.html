@@ -44,11 +44,12 @@
   html,body{margin:0;padding:0;}
   body{
     font-family: var(--body);
-    background: transparent;
+    background: #EDEBE3;
     color: var(--ink);
     display:flex;
     justify-content:center;
     -webkit-font-smoothing:antialiased;
+    min-height:100vh;
   }
   #app{
     width:100%;
@@ -59,14 +60,35 @@
     display:flex;
     flex-direction:column;
     box-shadow: 0 0 0 1px var(--line);
-    border-radius: 18px;
     overflow:hidden;
   }
+  .card-grid{ display:flex; flex-direction:column; gap:9px; }
 
-  /* Responsive: en tablet/escritorio se ve como una tarjeta centrada, no una app estirada */
-  @media (min-width: 720px){
-    body{ padding: 32px 16px; align-items:flex-start; }
-    #app{ max-width:480px; min-height: calc(100vh - 64px); box-shadow: 0 12px 40px rgba(23,32,56,.14), 0 0 0 1px var(--line); }
+  /* Responsive: la app crece por etapas según el ancho real de la pantalla,
+     en vez de quedarse como una tarjeta angosta flotando en un fondo vacío. */
+  @media (min-width: 640px){
+    body{
+      padding: 40px 20px;
+      align-items:flex-start;
+      background:
+        radial-gradient(circle at 15% 0%, rgba(23,32,56,.05), transparent 45%),
+        radial-gradient(circle at 100% 100%, rgba(23,32,56,.05), transparent 45%),
+        #EDEBE3;
+    }
+    #app{
+      max-width:600px;
+      min-height: calc(100vh - 80px);
+      border-radius: 20px;
+      box-shadow: 0 20px 60px rgba(23,32,56,.16), 0 0 0 1px var(--line);
+    }
+    .card-grid{ display:grid; grid-template-columns: repeat(2, 1fr); gap:10px; }
+  }
+  @media (min-width: 1000px){
+    #app{ max-width:760px; }
+  }
+  @media (min-width: 1350px){
+    #app{ max-width:860px; }
+    .card-grid{ grid-template-columns: repeat(3, 1fr); }
   }
   @media (max-width: 380px){
     main{ padding-left:14px; padding-right:14px; }
@@ -980,7 +1002,7 @@ function renderLanding(){
       </div>
       ${state.isAdmin ? `<button class="btn ghost" style="width:100%;margin:10px 0;" onclick="abrirAdmin()">⚙️ Administración de usuarios</button>` : ''}
       <div class="eyebrow-label" style="margin-top:14px;">Actividad reciente</div>
-      ${state.aprs.slice(0,3).map(a=>aprMiniCard(a)).join('') || '<div class="empty-state">Aún no hay APR creados.</div>'}
+      <div class="card-grid">${state.aprs.slice(0,3).map(a=>aprMiniCard(a)).join('') || '<div class="empty-state">Aún no hay APR creados.</div>'}</div>
       <button class="btn ghost" style="width:100%;margin-top:18px;" onclick="doLogout()">Cerrar sesión</button>
     </div>
   `;
@@ -1008,7 +1030,7 @@ function renderMisAprs(){
   return `
     ${header('Mis APR', 'HISTORIAL', {back:"nav('landing')"})}
     <main>
-      ${state.aprs.length ? state.aprs.map(a=>aprMiniCard(a)).join('') : '<div class="empty-state">Aún no has creado ningún APR.<br>Toca "Crear nuevo APR" para empezar.</div>'}
+      <div class="card-grid">${state.aprs.length ? state.aprs.map(a=>aprMiniCard(a)).join('') : '<div class="empty-state">Aún no has creado ningún APR.<br>Toca "Crear nuevo APR" para empezar.</div>'}</div>
     </main>
   `;
 }
@@ -1022,11 +1044,11 @@ function renderBuscar(){
         <input type="text" id="folio_busqueda" placeholder="Ej. APR-2026-0004" value="${state.searchQuery||''}" style="flex:1;border:1.5px solid var(--line);border-radius:9px;padding:9px 11px;font-size:14px;background:#fbfaf7;" onkeydown="if(event.key==='Enter') buscarPorFolio()">
         <button class="btn primary" style="flex:0 0 auto;padding:9px 16px;" onclick="buscarPorFolio()">Buscar</button>
       </div>
-      ${state.searchDone ? (
+      <div class="card-grid">${state.searchDone ? (
         results.length
           ? results.map(a=>aprMiniCard(a)).join('')
           : '<div class="empty-state">No se encontró ningún APR con ese folio.</div>'
-      ) : '<div class="empty-state">Escribe un folio (o parte de él) y toca Buscar.</div>'}
+      ) : '<div class="empty-state">Escribe un folio (o parte de él) y toca Buscar.</div>'}</div>
     </main>
   `;
 }
@@ -2258,14 +2280,14 @@ function renderAdminUsuarios(){
   return `
     ${header('Usuarios y roles', 'ADMINISTRACIÓN', {back:"nav('admin')"})}
     <main>
-      ${state.adminUsers.length ? state.adminUsers.map(u=>`
+      <div class="card-grid">${state.adminUsers.length ? state.adminUsers.map(u=>`
         <div class="card" style="padding:12px 14px;">
           <div style="font-weight:600;font-size:13.5px;margin-bottom:8px;">${u.nombre || u.id}</div>
           <select onchange="cambiarRolUsuario('${u.id}', this.value)">
             ${roles.map(r=>`<option value="${r}" ${u.rol===r?'selected':''}>${ROLE_LABELS[r]}</option>`).join('')}
           </select>
         </div>
-      `).join('') : '<div class="empty-state">No hay usuarios registrados todavía.</div>'}
+      `).join('') : '<div class="empty-state">No hay usuarios registrados todavía.</div>'}</div>
     </main>
   `;
 }
